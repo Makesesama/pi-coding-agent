@@ -56,6 +56,12 @@ When set, per-message fontification and table decoration are skipped;
 `pi-coding-agent--postprocess-history-buffer' runs one consolidated pass after
 all history has been inserted.")
 
+(defvar-local pi-coding-agent--streaming-table-candidate nil
+  "Non-nil when recent streaming text may contain a markdown pipe table.
+Streaming table decoration is comparatively expensive because it queries the
+current message with tree-sitter.  Most assistant text is not table content, so
+we track whether a pipe has appeared since the last decoration attempt and skip
+the query when no table can be present.")
 
 (defun pi-coding-agent--history-postprocessing-deferred-p ()
   "Return non-nil when history display post-processing is currently deferred."
@@ -95,6 +101,7 @@ Note: status is set to `streaming' by the event handler."
   (setq pi-coding-agent--line-parse-state 'line-start)
   (setq pi-coding-agent--in-code-block nil)
   (setq pi-coding-agent--in-thinking-block nil)
+  (setq pi-coding-agent--streaming-table-candidate nil)
   (pi-coding-agent--set-activity-phase "thinking"))
 
 (defun pi-coding-agent--process-streaming-char (char state in-block)
@@ -194,8 +201,14 @@ fontification; tree-sitter re-parses at the C level on each insert."
           (goto-char (marker-position pi-coding-agent--streaming-marker))
           (insert transformed)
           (set-marker pi-coding-agent--streaming-marker (point))))
-      ;; After inserting text with completed lines, check for active table
-      (when (string-match-p "\n" delta)
+      ;; After inserting text with completed lines, check for active tables only
+      ;; if recent streaming text contained a pipe.  This avoids a tree-sitter
+      ;; table query on every non-table newline in long assistant messages.
+      (when (string-match-p "|" delta)
+        (setq pi-coding-agent--streaming-table-candidate t))
+      (when (and pi-coding-agent--streaming-table-candidate
+                 (string-match-p "\n" delta))
+        (setq pi-coding-agent--streaming-table-candidate nil)
         (pi-coding-agent--maybe-decorate-streaming-table)))))
 
 (defun pi-coding-agent--thinking-insert-position ()
@@ -1144,7 +1157,8 @@ Updates buffer-local state and renders display updates."
          ("text_end"
           ;; Text block ended — finalize any active table that may have
           ;; a trailing row without newline (backstop for streaming).
-          (pi-coding-agent--maybe-decorate-streaming-table))
+          (pi-coding-agent--maybe-decorate-streaming-table)
+          (setq pi-coding-agent--streaming-table-candidate nil))
          ("thinking_start"
           (pi-coding-agent--display-thinking-start))
          ("thinking_delta"

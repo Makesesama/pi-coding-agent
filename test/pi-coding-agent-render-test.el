@@ -50,6 +50,43 @@
     (pi-coding-agent--display-message-delta "world!")
     (should (string-match-p "Hello, world!" (buffer-string)))))
 
+(ert-deftest pi-coding-agent-test-display-message-delta-skips-table-scan-without-pipe ()
+  "Streaming text without pipes should not query for markdown tables."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (pi-coding-agent--display-agent-start)
+    (let ((table-scan-count 0))
+      (cl-letf (((symbol-function 'pi-coding-agent--maybe-decorate-streaming-table)
+                 (lambda () (setq table-scan-count (1+ table-scan-count)))))
+        (pi-coding-agent--display-message-delta "ordinary prose\nmore prose\n"))
+      (should (= table-scan-count 0)))))
+
+(ert-deftest pi-coding-agent-test-display-message-delta-scans-table-after-pipe-newline ()
+  "Streaming text with a pipe and newline should check for markdown tables."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (pi-coding-agent--display-agent-start)
+    (let ((table-scan-count 0))
+      (cl-letf (((symbol-function 'pi-coding-agent--maybe-decorate-streaming-table)
+                 (lambda () (setq table-scan-count (1+ table-scan-count)))))
+        (pi-coding-agent--display-message-delta "| a | b |")
+        (should (= table-scan-count 0))
+        (pi-coding-agent--display-message-delta "\n|---|---|\n"))
+      (should (= table-scan-count 1)))))
+
+(ert-deftest pi-coding-agent-test-text-end-clears-streaming-table-candidate ()
+  "The text_end table backstop clears any pending streaming table candidate."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--streaming-table-candidate t)
+    (let ((table-scan-count 0))
+      (cl-letf (((symbol-function 'pi-coding-agent--maybe-decorate-streaming-table)
+                 (lambda () (setq table-scan-count (1+ table-scan-count)))))
+        (pi-coding-agent--handle-display-event
+         '(:type "message_update"
+           :assistantMessageEvent (:type "text_end"))))
+      (should (= table-scan-count 1))
+      (should-not pi-coding-agent--streaming-table-candidate))))
 
 (ert-deftest pi-coding-agent-test-delta-transforms-atx-headings ()
   "ATX headings in assistant content are leveled down.
