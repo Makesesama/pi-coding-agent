@@ -103,6 +103,26 @@ or customize =pi-coding-agent-executable=.  An example:
         '("npx" "-y" "@earendil-works/pi-coding-agent@latest"))
 #+end_src
 
+*** Project-local Pi resources
+
+Pi does not show its project trust prompt in RPC mode.  To make Emacs
+sessions behave like the usual trusted project workflow,
+=pi-coding-agent= passes =--approve= by default so project-local
+=.pi= prompts, skills, settings, themes, and extensions are active.
+
+Set =pi-coding-agent-project-trust-policy= to =default= to pass no
+trust flag and let Pi use its saved trust decisions and
+=defaultProjectTrust=:
+
+#+begin_src emacs-lisp
+;; Let Pi decide project trust from ~/.pi/agent/trust.json
+;; and its global defaultProjectTrust setting.
+(setopt pi-coding-agent-project-trust-policy 'default)
+#+end_src
+
+Set it to =no-approve= to pass =--no-approve= and ignore
+project-local Pi files for Emacs sessions.
+
 *** Grammar installation fails
 
 Grammar installation needs a working C compiler.  Install =gcc= or
@@ -256,7 +276,6 @@ Here's some common non-default preferences:
 (setopt pi-coding-agent-visit-file-other-window nil)
 #+end_src
 
-
 Less common tuning knobs:
 
 #+begin_src emacs-lisp
@@ -274,6 +293,9 @@ Less common tuning knobs:
 ;; Keep more recent turns live for table rewrapping and tool overlays:
 ;; Older history is cooled to keep long sessions fast.
 ;; (setopt pi-coding-agent-hot-tail-turn-count 5)
+
+;; Let Pi's saved project trust decisions decide whether .pi resources load:
+;; (setopt pi-coding-agent-project-trust-policy 'default)
 
 ;; Hidden thinking uses generic line-count stubs instead of first-line previews:
 ;; (setopt pi-coding-agent-thinking-hidden-preview nil)

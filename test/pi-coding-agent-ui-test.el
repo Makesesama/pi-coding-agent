@@ -850,6 +850,10 @@ Buffer is read-only with `inhibit-read-only' used for insertion.
   "pi-coding-agent-copy-raw-markdown defcustom defaults to nil."
   (should (eq pi-coding-agent-copy-raw-markdown nil)))
 
+(ert-deftest pi-coding-agent-test-project-trust-policy-default ()
+  "Project trust policy defaults to approving project-local Pi inputs."
+  (should (eq pi-coding-agent-project-trust-policy 'approve)))
+
 (ert-deftest pi-coding-agent-test-hot-tail-turn-count-defcustom-defaults ()
   "Hot-tail turn count defaults to 3 headed turns."
   (should (= 3 pi-coding-agent-hot-tail-turn-count)))

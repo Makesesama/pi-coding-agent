@@ -88,12 +88,29 @@
 (defcustom pi-coding-agent-executable '("pi")
   "Command to invoke the pi binary, as a list of strings.
 The first element is the program; remaining elements are passed
-before \"--mode rpc\" and `pi-coding-agent-extra-args'.
+before \"--mode rpc\", `pi-coding-agent-extra-args', and the project
+trust flag selected by `pi-coding-agent-project-trust-policy'.
 
 For npx users:
   (setq pi-coding-agent-executable
         \\='(\"npx\" \"-y\" \"@earendil-works/pi-coding-agent@0.75.5\"))"
   :type '(repeat string)
+  :group 'pi-coding-agent)
+
+(defcustom pi-coding-agent-project-trust-policy 'approve
+  "How to pass Pi project trust flags when starting RPC sessions.
+Pi does not show its built-in project trust prompt in RPC mode.  The
+Emacs frontend therefore approves project-local Pi inputs by default so
+`.pi' prompts, skills, settings, themes, and extensions are available.
+
+Allowed values are:
+- `approve'     Pass --approve and trust project-local files for this run.
+- `default'     Pass no trust flag and let Pi use trust.json and
+                defaultProjectTrust.
+- `no-approve'  Pass --no-approve and ignore project-local files for this run."
+  :type '(choice (const :tag "Approve project-local files" approve)
+                 (const :tag "Use Pi's trust default" default)
+                 (const :tag "Ignore project-local files" no-approve))
   :group 'pi-coding-agent)
 
 (defcustom pi-coding-agent-rpc-timeout 30
