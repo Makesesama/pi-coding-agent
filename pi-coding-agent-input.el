@@ -41,11 +41,107 @@
 ;;   `pi-coding-agent-input-next-message'    Navigate next chat message
 ;;   `pi-coding-agent-history-isearch-backward'  History search (C-r)
 ;;   `pi-coding-agent-queue-steering'        Steering message (C-c C-s)
+;;   `pi-coding-agent-paste-image-from-clipboard'  Paste Wayland image (C-c C-i)
 
 ;;; Code:
 
 (require 'pi-coding-agent-render)
 (require 'ring)
+(require 'seq)
+(require 'subr-x)
+
+;;;; Image Clipboard
+
+(defcustom pi-coding-agent-image-clipboard-command "wl-paste"
+  "Program used to read image data from the system clipboard.
+The command must support wl-clipboard's `--list-types' and `--type TYPE'
+options.  Set this to nil to disable image clipboard paste support."
+  :type '(choice (const :tag "Disabled" nil)
+                 (string :tag "Command"))
+  :group 'pi-coding-agent)
+
+(defcustom pi-coding-agent-image-clipboard-types
+  '(("image/png" . ".png")
+    ("image/jpeg" . ".jpg")
+    ("image/webp" . ".webp")
+    ("image/gif" . ".gif"))
+  "Clipboard image MIME types supported by `pi-coding-agent-paste-image-from-clipboard'.
+Each entry is (MIME-TYPE . FILE-EXTENSION), checked in order."
+  :type '(alist :key-type string :value-type string)
+  :group 'pi-coding-agent)
+
+(defcustom pi-coding-agent-image-clipboard-directory temporary-file-directory
+  "Directory where clipboard images are saved before insertion.
+When nil, use `temporary-file-directory'."
+  :type '(choice (const :tag "Use temporary-file-directory" nil)
+                 directory)
+  :group 'pi-coding-agent)
+
+(defun pi-coding-agent--clipboard-command ()
+  "Return the configured clipboard command, or signal a user error."
+  (let ((command pi-coding-agent-image-clipboard-command))
+    (unless (and command (not (string-empty-p command)))
+      (user-error "Image clipboard paste is disabled"))
+    (unless (executable-find command)
+      (user-error "Cannot find %s; install wl-clipboard or customize %s"
+                  command 'pi-coding-agent-image-clipboard-command))
+    command))
+
+(defun pi-coding-agent--clipboard-image-type ()
+  "Return the best supported image MIME type currently on the clipboard."
+  (let ((command (pi-coding-agent--clipboard-command)))
+    (with-temp-buffer
+      (let ((status (call-process command nil t nil "--list-types")))
+        (unless (eq status 0)
+          (user-error "%s --list-types failed" command)))
+      (let ((types (split-string (buffer-string) "\n" t)))
+        (or (car (seq-filter (lambda (entry)
+                               (member (car entry) types))
+                             pi-coding-agent-image-clipboard-types))
+            (user-error "Clipboard does not contain a supported image type"))))))
+
+(defun pi-coding-agent--clipboard-image-data (mime-type)
+  "Return raw clipboard image bytes for MIME-TYPE."
+  (let ((command (pi-coding-agent--clipboard-command)))
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (let ((coding-system-for-read 'binary)
+            (coding-system-for-write 'binary)
+            (status (call-process command nil t nil "--type" mime-type)))
+        (unless (and (eq status 0) (> (buffer-size) 0))
+          (user-error "%s --type %s did not return image data" command mime-type)))
+      (buffer-string))))
+
+(defun pi-coding-agent--write-clipboard-image (data extension)
+  "Write raw image DATA to a temporary file with EXTENSION and return its path."
+  (let* ((dir (file-name-as-directory
+               (expand-file-name (or pi-coding-agent-image-clipboard-directory
+                                     temporary-file-directory))))
+         (file (make-temp-file (expand-file-name "pi-coding-agent-image-" dir)
+                               nil extension))
+         (coding-system-for-write 'binary))
+    (write-region data nil file nil 'silent)
+    file))
+
+(defun pi-coding-agent--insert-file-reference (file)
+  "Insert an @FILE reference at point, adding spacing when helpful."
+  (unless (or (bobp) (looking-back "[[:space:]]" 1))
+    (insert " "))
+  (insert "@" file)
+  (unless (or (eobp) (looking-at-p "[[:space:]]"))
+    (insert " ")))
+
+(defun pi-coding-agent-paste-image-from-clipboard ()
+  "Save a Wayland clipboard image to a temp file and insert an @file reference.
+This uses `pi-coding-agent-image-clipboard-command', which defaults to
+wl-clipboard's wl-paste.  The image is not sent immediately; edit the
+prompt as needed, then send normally with `pi-coding-agent-send'."
+  (interactive)
+  (pcase-let* ((`(,mime-type . ,extension) (pi-coding-agent--clipboard-image-type))
+               (data (pi-coding-agent--clipboard-image-data mime-type))
+               (file (pi-coding-agent--write-clipboard-image data extension)))
+    (pi-coding-agent--insert-file-reference file)
+    (message "Pi: Inserted clipboard image reference %s" file)))
 
 ;;;; Input History (comint/eshell style)
 

@@ -3679,6 +3679,50 @@ This occurs after compaction before the next assistant message."
       (should result)
       (should (member "test.el" (nth 2 result))))))
 
+;;; Image Clipboard Paste
+
+(ert-deftest pi-coding-agent-test-clipboard-image-type-selects-supported-mime ()
+  "Clipboard image type detection picks the first configured supported type."
+  (let ((pi-coding-agent-image-clipboard-command "wl-paste"))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (command) (and (equal command "wl-paste") command)))
+              ((symbol-function 'call-process)
+               (lambda (_program _infile destination _display &rest args)
+                 (should (equal args '("--list-types")))
+                 (if (eq destination t)
+                     (insert "text/plain\nimage/webp\nimage/png\n")
+                   (with-current-buffer destination
+                     (insert "text/plain\nimage/webp\nimage/png\n")))
+                 0)))
+      (should (equal (pi-coding-agent--clipboard-image-type)
+                     '("image/png" . ".png"))))))
+
+(ert-deftest pi-coding-agent-test-paste-image-from-clipboard-inserts-file-reference ()
+  "Pasting a clipboard image inserts an @file reference at point."
+  (with-temp-buffer
+    (pi-coding-agent-input-mode)
+    (insert "Describe")
+    (cl-letf (((symbol-function 'pi-coding-agent--clipboard-image-type)
+               (lambda () '("image/png" . ".png")))
+              ((symbol-function 'pi-coding-agent--clipboard-image-data)
+               (lambda (mime-type)
+                 (should (equal mime-type "image/png"))
+                 "PNG DATA"))
+              ((symbol-function 'pi-coding-agent--write-clipboard-image)
+               (lambda (data extension)
+                 (should (equal data "PNG DATA"))
+                 (should (equal extension ".png"))
+                 "/tmp/pi-coding-agent-image-test.png"))
+              ((symbol-function 'message) #'ignore))
+      (pi-coding-agent-paste-image-from-clipboard)
+      (should (equal (buffer-string)
+                     "Describe @/tmp/pi-coding-agent-image-test.png")))))
+
+(ert-deftest pi-coding-agent-test-paste-image-keybinding ()
+  "Input mode binds C-c C-i to image clipboard paste."
+  (should (eq (lookup-key pi-coding-agent-input-mode-map (kbd "C-c C-i"))
+              #'pi-coding-agent-paste-image-from-clipboard)))
+
 ;;; Path Completion (Tab)
 
 (ert-deftest pi-coding-agent-test-path-capf-returns-nil-for-non-path ()
