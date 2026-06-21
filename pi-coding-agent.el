@@ -56,6 +56,7 @@
 ;;     C-c C-k        Abort current operation
 ;;     C-c C-p        Open menu
 ;;     C-c C-r        Resume session
+;;     C-c C-i        Paste Wayland clipboard image as @file reference
 ;;     M-p / M-n      History navigation
 ;;     C-r            Incremental history search (like readline)
 ;;     TAB            Path/file completion
@@ -69,6 +70,7 @@
 ;;
 ;; Editor Features:
 ;;   - File reference (@): Type @ to search project files (respects .gitignore)
+;;   - Image clipboard paste: C-c C-i saves a Wayland clipboard image and inserts @file
 ;;   - Path completion (Tab): Complete relative paths, ../, ~/, etc.
 ;;   - Message queuing: Submit messages while agent is working:
 ;;       C-c C-c  queues follow-up (delivered after agent completes)
