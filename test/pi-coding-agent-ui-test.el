@@ -2294,3 +2294,164 @@ Binds `chat-win' and `input-win' for use in BODY."
 
 (provide 'pi-coding-agent-ui-test)
 ;;; pi-coding-agent-ui-test.el ends here
+
+(ert-deftest pi-coding-agent-test-widget-header-formats-live-widgets ()
+  "Header line includes compact live widget summaries."
+  (let ((chat-buf (generate-new-buffer "*test-widget-header-chat*"))
+        (input-buf (generate-new-buffer "*test-widget-header-input*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer chat-buf
+            (pi-coding-agent-chat-mode)
+            (setq pi-coding-agent--state '(:model (:name "test-model"))
+                  pi-coding-agent--widgets
+                  '(("subagents" . (:key "subagents"
+                                      :lines ("⠋ scout running"))))))
+          (with-current-buffer input-buf
+            (pi-coding-agent-input-mode)
+            (setq pi-coding-agent--chat-buffer chat-buf)
+            (should (string-match-p "scout running"
+                                    (substring-no-properties
+                                     (pi-coding-agent--header-line-string))))))
+      (kill-buffer chat-buf)
+      (kill-buffer input-buf))))
+
+(ert-deftest pi-coding-agent-test-widget-header-respects-disabled-option ()
+  "Header line omits widgets when `pi-coding-agent-widgets-enabled' is nil."
+  (let ((chat-buf (generate-new-buffer "*test-widget-disabled-chat*"))
+        (input-buf (generate-new-buffer "*test-widget-disabled-input*"))
+        (pi-coding-agent-widgets-enabled nil))
+    (unwind-protect
+        (progn
+          (with-current-buffer chat-buf
+            (pi-coding-agent-chat-mode)
+            (setq pi-coding-agent--state '(:model (:name "test-model"))
+                  pi-coding-agent--widgets
+                  '(("subagents" . (:key "subagents"
+                                      :lines ("⠋ scout running"))))))
+          (with-current-buffer input-buf
+            (pi-coding-agent-input-mode)
+            (setq pi-coding-agent--chat-buffer chat-buf)
+            (should-not (string-match-p "scout running"
+                                        (substring-no-properties
+                                         (pi-coding-agent--header-line-string))))))
+      (kill-buffer chat-buf)
+      (kill-buffer input-buf))))
+
+(ert-deftest pi-coding-agent-test-widget-mode-line-indicator ()
+  "Mode-line widget indicator shows live widget count and warnings."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--widgets
+          '(("subagents" . (:key "subagents"
+                              :lines ("⚠ worker needs attention")))))
+    (should (equal (substring-no-properties
+                    (pi-coding-agent--widgets-mode-line-string))
+                   " PiW:1!"))))
+
+(ert-deftest pi-coding-agent-test-subagents-mode-line-active ()
+  "Mode-line subagent indicator shows active (running/queued) count."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--subagents
+          '((:id "a" :status "running")
+            (:id "b" :status "queued")
+            (:id "c" :status "complete")))
+    (should (equal (substring-no-properties
+                    (pi-coding-agent--subagents-mode-line-string))
+                   " Pi⎇:2"))))
+
+(ert-deftest pi-coding-agent-test-subagents-mode-line-failed ()
+  "Mode-line subagent indicator flags failures with a bang."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--subagents
+          '((:id "a" :status "failed")))
+    (should (equal (substring-no-properties
+                    (pi-coding-agent--subagents-mode-line-string))
+                   " Pi⎇:1!"))))
+
+(ert-deftest pi-coding-agent-test-subagents-mode-line-counts-children ()
+  "Subagent counts recurse into nested children."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--subagents
+          '((:id "root" :status "running"
+             :children ((:id "c1" :status "running")
+                        (:id "c2" :status "queued")))))
+    ;; 3 total, all active.
+    (should (equal (pi-coding-agent--subagent-counts pi-coding-agent--subagents)
+                   '(3 3 0)))))
+
+(ert-deftest pi-coding-agent-test-subagents-mode-line-empty ()
+  "Mode-line subagent indicator is nil when there are no runs."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--subagents nil)
+    (should-not (pi-coding-agent--subagents-mode-line-string))))
+
+(ert-deftest pi-coding-agent-test-subagent-output-renders-entries ()
+  "Subagent output rendering formats jsonl entries as readable text."
+  (let ((file (make-temp-file "pi-subagent-out" nil ".jsonl"))
+        (buf (generate-new-buffer "*test-subagent-output*")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert (json-serialize
+                     '(:type "message" :message
+                       (:role "user" :content [(:type "text" :text "Do the task")])))
+                    "\n")
+            (insert (json-serialize
+                     '(:type "message" :message
+                       (:role "assistant" :content
+                        [(:type "thinking" :text "considering")
+                         (:type "toolCall" :name "bash"
+                          :arguments "{\"command\":\"ls\"}")])))
+                    "\n")
+            (insert (json-serialize
+                     '(:type "message" :message
+                       (:role "toolResult" :content [(:type "text" :text "file1 file2")])))
+                    "\n"))
+          (pi-coding-agent--subagent-render-output file buf)
+          (with-current-buffer buf
+            (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+              (should (string-match-p "user" text))
+              (should (string-match-p "Do the task" text))
+              (should (string-match-p "assistant" text))
+              (should (string-match-p "considering" text))
+              ;; Tool call rendered with arrow + name, not raw JSON object.
+              (should (string-match-p "→ bash" text))
+              (should (string-match-p "file1 file2" text)))))
+      (delete-file file)
+      (kill-buffer buf))))
+
+(ert-deftest pi-coding-agent-test-subagent-output-handles-malformed-lines ()
+  "Malformed jsonl lines are skipped without aborting the render."
+  (let ((file (make-temp-file "pi-subagent-bad" nil ".jsonl"))
+        (buf (generate-new-buffer "*test-subagent-bad*")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "{not valid json\n")
+            (insert (json-serialize
+                     '(:type "message" :message
+                       (:role "user" :content [(:type "text" :text "hello")])))
+                    "\n"))
+          (pi-coding-agent--subagent-render-output file buf)
+          (with-current-buffer buf
+            (should (string-match-p
+                     "hello"
+                     (buffer-substring-no-properties (point-min) (point-max))))))
+      (delete-file file)
+      (kill-buffer buf))))
+
+(ert-deftest pi-coding-agent-test-subagent-output-truncates-long-blocks ()
+  "Long content blocks are truncated with a marker."
+  (let* ((pi-coding-agent-subagent-output-max-block 20)
+         (long (make-string 100 ?x)))
+    (should (string-match-p
+             "truncated"
+             (substring-no-properties
+              (pi-coding-agent--subagent-truncate long))))
+    (should (equal (pi-coding-agent--subagent-truncate "short") "short"))))
+

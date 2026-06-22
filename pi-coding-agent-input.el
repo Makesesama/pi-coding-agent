@@ -345,6 +345,7 @@ markup visibility, mode identity, and keybindings.  Set
     (setq-local md-ts-hide-markup nil)
     (md-ts--set-hide-markup nil))
   (setq-local header-line-format '(:eval (pi-coding-agent--header-line-string)))
+  (setq-local mode-line-process '(:eval (pi-coding-agent--status-mode-line-string)))
   ;; Reset inherited completions (text-mode adds ispell, etc.) — our
   ;; input buffer should only offer slash commands, file refs, and paths.
   (setq-local completion-at-point-functions nil)

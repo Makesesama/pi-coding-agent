@@ -45,8 +45,10 @@
 (require 'project)
 (require 'md-ts-mode)
 (require 'pi-coding-agent-grammars)
+(require 'ansi-color)
 (require 'color)
 (require 'diff-mode)
+(require 'filenotify)
 
 
 ;; Forward declarations: keymaps bind functions defined in other modules.
@@ -228,6 +230,38 @@ For example:
                                             :value-type sexp)))
   :group 'pi-coding-agent)
 
+(defcustom pi-coding-agent-widgets-enabled t
+  "Whether extension `setWidget' requests are shown in Emacs UI.
+Widgets are live session UI state only; they are not persisted to the
+conversation transcript."
+  :type 'boolean
+  :group 'pi-coding-agent)
+
+(defcustom pi-coding-agent-widget-max-header-items 3
+  "Maximum number of live widgets summarized in the input header line."
+  :type 'natnum
+  :group 'pi-coding-agent)
+
+(defcustom pi-coding-agent-widget-max-header-width 80
+  "Maximum width of the live widget summary in the input header line."
+  :type 'natnum
+  :group 'pi-coding-agent)
+
+(defcustom pi-coding-agent-widgets-mode-line t
+  "Whether pi buffers show a compact live widget indicator in the mode line."
+  :type 'boolean
+  :group 'pi-coding-agent)
+
+(defcustom pi-coding-agent-subagents-mode-line t
+  "Whether pi buffers show a compact live subagent indicator in the mode line."
+  :type 'boolean
+  :group 'pi-coding-agent)
+
+(defcustom pi-coding-agent-widget-detail-buffer-height 10
+  "Preferred height for the live widget detail buffer."
+  :type 'natnum
+  :group 'pi-coding-agent)
+
 (defcustom pi-coding-agent-quit-without-confirmation nil
   "Whether `pi-coding-agent-quit' skips confirmation for a live process.
 When non-nil, quitting a session never asks whether a running pi process
@@ -338,6 +372,16 @@ Background is derived from the current theme so syntax faces stay visible."
 (defface pi-coding-agent-activity-phase
   '((t :inherit shadow))
   "Face for activity phase label in header line."
+  :group 'pi-coding-agent)
+
+(defface pi-coding-agent-widget-summary
+  '((t :inherit mode-line-emphasis))
+  "Face for live extension widget summaries."
+  :group 'pi-coding-agent)
+
+(defface pi-coding-agent-widget-warning
+  '((t :inherit warning))
+  "Face for live extension widget summaries needing attention."
   :group 'pi-coding-agent)
 
 (defface pi-coding-agent-retry-notice
@@ -766,6 +810,7 @@ This is a read-only buffer showing the conversation history."
   (setq-local window-point-insertion-type t)
   ;; Recent content is hot by default in a fresh chat buffer.
   (setq-local pi-coding-agent--hot-tail-start (copy-marker (point-min) nil))
+  (setq-local mode-line-process '(:eval (pi-coding-agent--status-mode-line-string)))
 
   ;; Run after font-lock to undo markdown damage in tool overlays.
   (jit-lock-register #'pi-coding-agent--restore-tool-properties)
@@ -1329,6 +1374,58 @@ Keys are extension identifiers (strings), values are status text.")
 
 (defvar-local pi-coding-agent--working-message nil
   "Transient extension working message for header-line display.")
+
+(defvar-local pi-coding-agent--widgets nil
+  "Alist of live extension widgets for this pi session.
+Each entry is (KEY . PLIST), where PLIST contains :key, :lines,
+:placement, and :updated-at.  Widget state is live UI only and is not
+persisted in the transcript.")
+
+(defvar-local pi-coding-agent--widget-detail-buffer nil
+  "Live detail buffer showing `pi-coding-agent--widgets' for this session.")
+
+(defconst pi-coding-agent--subagents-widget-key "pi-subagents-state"
+  "Reserved `setWidget' key carrying structured subagent run state.
+
+The pi-subagents extension emits a single JSON line under this key describing
+live subagent runs (id, agents, status, session file, nested children).  It is
+intercepted and parsed into `pi-coding-agent--subagents' instead of being
+displayed as a generic widget.")
+
+(defvar-local pi-coding-agent--subagents nil
+  "Parsed live subagent run state for this pi session.
+A list of plists, one per run, with keys :id, :agents, :status, :mode,
+:sessionFile, :outputFile, :sessionDir, :startedAt, :updatedAt, :currentTool,
+:turnCount and :children.  Populated from the reserved
+`pi-coding-agent--subagents-widget-key' widget.  Live UI only; not persisted.")
+
+(defun pi-coding-agent--subagents-from-widget-lines (lines)
+  "Parse subagent run state from reserved-widget LINES.
+LINES is the sanitized widget line list whose first element is a JSON object
+of the form {\"runs\": [...]}  Return a list of run plists, or nil when LINES
+is empty or malformed."
+  (let ((json (car (if (vectorp lines) (append lines nil) lines))))
+    (when (and (stringp json) (> (length (string-trim json)) 0))
+      (condition-case err
+          (let ((parsed (json-parse-string json
+                                           :object-type 'plist
+                                           :array-type 'list
+                                           :null-object nil
+                                           :false-object nil)))
+            (plist-get parsed :runs))
+        (error
+         (message "pi-coding-agent: ignoring malformed subagent state: %s"
+                  (error-message-string err))
+         nil)))))
+
+(defun pi-coding-agent--update-subagents (lines)
+  "Update `pi-coding-agent--subagents' from reserved-widget LINES.
+When LINES is nil (widget cleared) the run list is emptied.  Refreshes any
+open subagents list buffer."
+  (setq pi-coding-agent--subagents
+        (and lines (pi-coding-agent--subagents-from-widget-lines lines)))
+  (pi-coding-agent--refresh-subagents-list-buffer)
+  (force-mode-line-update t))
 
 (defvar-local pi-coding-agent--unsupported-extension-ui-methods-warned nil
   "Unsupported extension UI method names already warned for this pi session.")
@@ -2115,6 +2212,551 @@ when no session name exists."
       (concat " │ " (pi-coding-agent--truncate-string session-name 30))
     ""))
 
+(defvar pi-coding-agent--widgets-header-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [header-line mouse-1] #'pi-coding-agent-widgets)
+    (define-key map [mode-line mouse-1] #'pi-coding-agent-widgets)
+    map)
+  "Keymap for clickable live widget summaries.")
+
+(defun pi-coding-agent--widget-lines-from-event (lines)
+  "Return sanitized widget LINES as a list of strings."
+  (when lines
+    (mapcar (lambda (line)
+              (ansi-color-filter-apply (format "%s" line)))
+            (append lines nil))))
+
+(defun pi-coding-agent--widget-upsert (key lines &optional placement)
+  "Store widget KEY with LINES and PLACEMENT in the current chat buffer.
+When LINES is nil, remove KEY."
+  (when key
+    (let ((key (format "%s" key)))
+      (cond
+       ((and lines pi-coding-agent-widgets-enabled)
+        (setq pi-coding-agent--widgets
+              (cons (cons key (list :key key
+                                    :lines lines
+                                    :placement placement
+                                    :updated-at (float-time)))
+                    (assoc-delete-all key pi-coding-agent--widgets))))
+       ((null lines)
+        (setq pi-coding-agent--widgets
+              (assoc-delete-all key pi-coding-agent--widgets)))))
+    (pi-coding-agent--refresh-widget-detail-buffer)
+    (force-mode-line-update t)))
+
+(defconst pi-coding-agent--widget-live-regexp
+  (concat "running\\|queued\\|active\\|needs attention\\|working"
+          "\\|⠋\\|⠙\\|⠹\\|⠸\\|⠼\\|⠴\\|⠦\\|⠧\\|⠇\\|⠏")
+  "Regexp matching live widget text.")
+
+(defconst pi-coding-agent--widget-finished-regexp
+  "complete\\|completed\\|failed\\|cancelled"
+  "Regexp matching finished widget text.")
+
+(defun pi-coding-agent--widget-live-p (widget)
+  "Return non-nil when WIDGET appears to represent active work."
+  (let ((text (downcase (mapconcat #'identity (plist-get widget :lines) "\n"))))
+    (or (string-match-p pi-coding-agent--widget-live-regexp text)
+        (not (string-match-p pi-coding-agent--widget-finished-regexp text)))))
+
+(defun pi-coding-agent--widget-warning-p (widget)
+  "Return non-nil when WIDGET appears to need attention."
+  (string-match-p "needs attention\\|failed\\|error\\|blocked\\|⚠"
+                  (downcase (mapconcat #'identity
+                                        (plist-get widget :lines) "\n"))))
+
+(defun pi-coding-agent--widget-first-line (widget)
+  "Return a compact first line for WIDGET."
+  (let ((line (car (plist-get widget :lines))))
+    (if (and line (not (string-empty-p line)))
+        (string-trim line)
+      (plist-get widget :key))))
+
+(defun pi-coding-agent--widget-header-string (widgets)
+  "Return compact header-line text for live WIDGETS."
+  (when (and pi-coding-agent-widgets-enabled widgets)
+    (let* ((items (cl-subseq widgets 0 (min (length widgets)
+                                            pi-coding-agent-widget-max-header-items)))
+           (hidden (- (length widgets) (length items)))
+           (parts (mapcar (lambda (pair)
+                            (let* ((widget (cdr pair))
+                                   (line (pi-coding-agent--widget-first-line widget))
+                                   (face (if (pi-coding-agent--widget-warning-p widget)
+                                             'pi-coding-agent-widget-warning
+                                           'pi-coding-agent-widget-summary)))
+                              (propertize (pi-coding-agent--header-escape-text line)
+                                          'face face
+                                          'mouse-face 'highlight
+                                          'help-echo "mouse-1: show pi widgets"
+                                          'local-map pi-coding-agent--widgets-header-map)))
+                          items))
+           (text (mapconcat #'identity parts " · ")))
+      (when (> hidden 0)
+        (setq text (concat text (format " · +%d" hidden))))
+      (pi-coding-agent--truncate-string text pi-coding-agent-widget-max-header-width))))
+
+(defun pi-coding-agent--widget-counts (widgets)
+  "Return (TOTAL WARNINGS LIVE) counts for WIDGETS."
+  (let ((total (length widgets))
+        (warnings 0)
+        (live 0))
+    (dolist (pair widgets)
+      (when (pi-coding-agent--widget-warning-p (cdr pair))
+        (setq warnings (1+ warnings)))
+      (when (pi-coding-agent--widget-live-p (cdr pair))
+        (setq live (1+ live))))
+    (list total warnings live)))
+
+(defun pi-coding-agent--widgets-for-current-buffer ()
+  "Return widget alist for current pi chat or input buffer."
+  (let ((chat-buf (cond
+                   ((and pi-coding-agent--chat-buffer
+                         (buffer-live-p pi-coding-agent--chat-buffer))
+                    pi-coding-agent--chat-buffer)
+                   ((derived-mode-p 'pi-coding-agent-chat-mode)
+                    (current-buffer)))))
+    (and chat-buf
+         (buffer-local-value 'pi-coding-agent--widgets chat-buf))))
+
+(defun pi-coding-agent--widgets-mode-line-string ()
+  "Return a compact mode-line indicator for live extension widgets."
+  (when pi-coding-agent-widgets-mode-line
+    (let* ((widgets (pi-coding-agent--widgets-for-current-buffer))
+           (counts (and widgets (pi-coding-agent--widget-counts widgets)))
+           (total (nth 0 counts))
+           (warnings (nth 1 counts))
+           (live (nth 2 counts)))
+      (when (and total (> total 0))
+        (propertize (format " PiW:%s%s"
+                            (if (> live 0) live total)
+                            (if (> warnings 0) "!" ""))
+                    'face (if (> warnings 0)
+                              'pi-coding-agent-widget-warning
+                            'pi-coding-agent-widget-summary)
+                    'mouse-face 'mode-line-highlight
+                    'help-echo "mouse-1: show pi widgets"
+                    'local-map pi-coding-agent--widgets-header-map)))))
+
+(defvar pi-coding-agent--subagents-header-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mode-line mouse-1] #'pi-coding-agent-list-subagents)
+    (define-key map [header-line mouse-1] #'pi-coding-agent-list-subagents)
+    map)
+  "Keymap for the clickable live subagent mode-line indicator.")
+
+(defun pi-coding-agent--subagents-for-current-buffer ()
+  "Return parsed subagent runs for the current chat/input buffer, or nil."
+  (let ((chat-buf (cond
+                   ((and pi-coding-agent--chat-buffer
+                         (buffer-live-p pi-coding-agent--chat-buffer))
+                    pi-coding-agent--chat-buffer)
+                   ((derived-mode-p 'pi-coding-agent-chat-mode)
+                    (current-buffer)))))
+    (and chat-buf
+         (buffer-local-value 'pi-coding-agent--subagents chat-buf))))
+
+(defun pi-coding-agent--subagent-counts (runs)
+  "Return (TOTAL ACTIVE FAILED) counts for subagent RUNS, recursing children.
+ACTIVE counts runs whose status is \"running\" or \"queued\"."
+  (let ((total 0) (active 0) (failed 0))
+    (cl-labels
+        ((walk (rs)
+           (dolist (run rs)
+             (let ((status (plist-get run :status)))
+               (setq total (1+ total))
+               (cond
+                ((member status '("running" "queued")) (setq active (1+ active)))
+                ((equal status "failed") (setq failed (1+ failed))))
+               (let ((children (plist-get run :children)))
+                 (when children
+                   (walk (if (vectorp children) (append children nil) children))))))))
+      (walk (if (vectorp runs) (append runs nil) runs)))
+    (list total active failed)))
+
+(defun pi-coding-agent--subagents-mode-line-string ()
+  "Return a compact mode-line indicator for live subagent runs."
+  (when pi-coding-agent-subagents-mode-line
+    (let* ((runs (pi-coding-agent--subagents-for-current-buffer))
+           (counts (and runs (pi-coding-agent--subagent-counts runs)))
+           (total (nth 0 counts))
+           (active (nth 1 counts))
+           (failed (nth 2 counts)))
+      (when (and total (> total 0))
+        (propertize (format " Pi⎇:%s%s"
+                            (if (> active 0) active total)
+                            (if (> failed 0) "!" ""))
+                    'face (if (> failed 0)
+                              'pi-coding-agent-widget-warning
+                            'pi-coding-agent-widget-summary)
+                    'mouse-face 'mode-line-highlight
+                    'help-echo "mouse-1: list live subagents"
+                    'local-map pi-coding-agent--subagents-header-map)))))
+
+(defun pi-coding-agent--status-mode-line-string ()
+  "Return the combined mode-line indicator for widgets and subagents."
+  (concat (or (pi-coding-agent--widgets-mode-line-string) "")
+          (or (pi-coding-agent--subagents-mode-line-string) "")))
+
+(defun pi-coding-agent--widget-detail-buffer-name (chat-buf)
+  "Return detail buffer name for CHAT-BUF."
+  (format "*pi-coding-agent-widgets:%s*"
+          (buffer-name chat-buf)))
+
+(defun pi-coding-agent--render-widget-detail-buffer (chat-buf detail-buf)
+  "Render live widgets from CHAT-BUF into DETAIL-BUF."
+  (let ((widgets (buffer-local-value 'pi-coding-agent--widgets chat-buf))
+        (inhibit-read-only t))
+    (with-current-buffer detail-buf
+      (special-mode)
+      (setq-local pi-coding-agent--chat-buffer chat-buf)
+      (erase-buffer)
+      (insert "Pi widgets\n==========\n\n")
+      (if widgets
+          (dolist (pair widgets)
+            (let* ((widget (cdr pair))
+                   (key (plist-get widget :key))
+                   (placement (or (plist-get widget :placement) "aboveEditor"))
+                   (face (if (pi-coding-agent--widget-warning-p widget)
+                             'pi-coding-agent-widget-warning
+                           'pi-coding-agent-widget-summary)))
+              (insert (propertize key 'face face) "  " placement "\n")
+              (dolist (line (plist-get widget :lines))
+                (insert "  " line "\n"))
+              (insert "\n")))
+        (insert "No live widgets.\n")))))
+
+(defun pi-coding-agent--refresh-widget-detail-buffer ()
+  "Refresh the live widget detail buffer for the current chat session."
+  (when (and pi-coding-agent--widget-detail-buffer
+             (buffer-live-p pi-coding-agent--widget-detail-buffer))
+    (pi-coding-agent--render-widget-detail-buffer
+     (current-buffer) pi-coding-agent--widget-detail-buffer)))
+
+;;;###autoload
+(defun pi-coding-agent-widgets ()
+  "Show live extension widgets for the current pi session."
+  (interactive)
+  (let ((chat-buf (cond
+                   ((derived-mode-p 'pi-coding-agent-chat-mode) (current-buffer))
+                   ((and pi-coding-agent--chat-buffer
+                         (buffer-live-p pi-coding-agent--chat-buffer))
+                    pi-coding-agent--chat-buffer)
+                   (t (user-error "Not in a pi-coding-agent buffer")))))
+    (with-current-buffer chat-buf
+      (let ((buf (get-buffer-create
+                  (pi-coding-agent--widget-detail-buffer-name chat-buf))))
+        (setq pi-coding-agent--widget-detail-buffer buf)
+        (pi-coding-agent--render-widget-detail-buffer chat-buf buf)
+        (display-buffer buf `((display-buffer-reuse-window
+                               display-buffer-below-selected)
+                              (window-height . ,pi-coding-agent-widget-detail-buffer-height)))))))
+
+;;; Live subagents list
+
+(defvar-local pi-coding-agent--subagents-list-buffer nil
+  "Live list buffer showing `pi-coding-agent--subagents' for this session.")
+
+(defcustom pi-coding-agent-subagents-list-buffer-height 12
+  "Preferred height for the live subagents list buffer."
+  :type 'natnum
+  :group 'pi-coding-agent)
+
+(defun pi-coding-agent--subagent-status-glyph (status)
+  "Return a display glyph for a subagent STATUS string."
+  (pcase status
+    ("running" "▶")
+    ("queued"  "◦")
+    ("complete" "✓")
+    ("failed"  "✗")
+    ("paused"  "■")
+    (_ "·")))
+
+(defun pi-coding-agent--subagent-status-face (status)
+  "Return a face for a subagent STATUS string."
+  (pcase status
+    ("failed" 'pi-coding-agent-widget-warning)
+    (_ 'pi-coding-agent-widget-summary)))
+
+(defun pi-coding-agent--subagent-row-label (run &optional depth)
+  "Return a one-line label string for subagent RUN at indent DEPTH."
+  (let* ((status (or (plist-get run :status) "?"))
+         (agents (plist-get run :agents))
+         (agent (cond
+                 ((plist-get run :agent) (plist-get run :agent))
+                 ((and agents (listp agents)) (mapconcat #'identity agents ", "))
+                 ((vectorp agents) (mapconcat #'identity (append agents nil) ", "))
+                 (t "?")))
+         (tool (plist-get run :currentTool))
+         (turns (plist-get run :turnCount))
+         (indent (make-string (* 2 (or depth 0)) ?\s))
+         (glyph (pi-coding-agent--subagent-status-glyph status))
+         (extra (string-join
+                 (delq nil
+                       (list (when tool (format "tool: %s" tool))
+                             (when turns (format "turns: %s" turns))))
+                 ", ")))
+    (concat indent glyph " "
+            (propertize agent 'face 'bold)
+            " "
+            (propertize (format "[%s]" status)
+                        'face (pi-coding-agent--subagent-status-face status))
+            (if (string-empty-p extra) "" (format "  (%s)" extra)))))
+
+(defun pi-coding-agent--subagent-session-file (run)
+  "Return the session file path for subagent RUN, or nil.
+Prefers an explicit :sessionFile, otherwise derives it from :sessionDir."
+  (let ((file (plist-get run :sessionFile))
+        (dir (plist-get run :sessionDir)))
+    (cond
+     ((and (stringp file) (> (length file) 0)) file)
+     ((and (stringp dir) (> (length dir) 0))
+      (expand-file-name "session.jsonl" dir))
+     (t nil))))
+
+;;; Subagent output rendering
+
+(defcustom pi-coding-agent-subagent-output-max-block 4000
+  "Maximum characters rendered per content block in subagent output buffers.
+Longer text/tool blocks are truncated with an ellipsis marker."
+  :type 'natnum
+  :group 'pi-coding-agent)
+
+(defvar-local pi-coding-agent--subagent-output-file nil
+  "Absolute path of the session.jsonl rendered in this output buffer.")
+
+(defvar-local pi-coding-agent--subagent-output-watch nil
+  "File-notify descriptor tailing `pi-coding-agent--subagent-output-file'.")
+
+(defun pi-coding-agent--subagent-truncate (text)
+  "Truncate TEXT to `pi-coding-agent-subagent-output-max-block' characters."
+  (let ((text (string-trim-right (or text ""))))
+    (if (> (length text) pi-coding-agent-subagent-output-max-block)
+        (concat (substring text 0 pi-coding-agent-subagent-output-max-block)
+                (propertize " …[truncated]" 'face 'shadow))
+      text)))
+
+(defun pi-coding-agent--subagent-render-tool-call (block)
+  "Render a toolCall BLOCK plist into the current buffer."
+  (let* ((name (or (plist-get block :name) "tool"))
+         (args (plist-get block :arguments))
+         (args-str (cond ((stringp args) args)
+                         (args (format "%s" args))
+                         (t ""))))
+    (insert (propertize (format "→ %s" name) 'face 'pi-coding-agent-tool-name))
+    (when (> (length (string-trim args-str)) 0)
+      (insert " "
+              (propertize (pi-coding-agent--subagent-truncate
+                           (string-trim args-str))
+                          'face 'pi-coding-agent-tool-command)))
+    (insert "\n")))
+
+(defun pi-coding-agent--subagent-render-blocks (blocks)
+  "Render message content BLOCKS (a list of plists) into the current buffer."
+  (dolist (block (if (vectorp blocks) (append blocks nil) blocks))
+    (pcase (plist-get block :type)
+      ("text"
+       (insert (pi-coding-agent--subagent-truncate (plist-get block :text))
+               "\n"))
+      ("thinking"
+       (insert (propertize
+                (pi-coding-agent--subagent-truncate
+                 (or (plist-get block :thinking) (plist-get block :text)))
+                'face 'font-lock-comment-face)
+               "\n"))
+      ("toolCall"
+       (pi-coding-agent--subagent-render-tool-call block))
+      (_ nil))))
+
+(defun pi-coding-agent--subagent-render-entry (entry)
+  "Render one parsed session ENTRY plist into the current buffer."
+  (pcase (plist-get entry :type)
+    ("message"
+     (let* ((message (plist-get entry :message))
+            (role (plist-get message :role))
+            (content (plist-get message :content)))
+       (pcase role
+         ("user"
+          (insert (propertize "▸ user\n" 'face 'bold))
+          (pi-coding-agent--subagent-render-blocks content))
+         ("assistant"
+          (insert (propertize "▸ assistant\n" 'face 'pi-coding-agent-model-name))
+          (pi-coding-agent--subagent-render-blocks content))
+         ("toolResult"
+          (let ((text (mapconcat
+                       (lambda (b) (or (plist-get b :text) ""))
+                       (if (vectorp content) (append content nil) content)
+                       "")))
+            (insert (propertize
+                     (pi-coding-agent--subagent-truncate text)
+                     'face 'pi-coding-agent-tool-output)
+                    "\n")))
+         (_ nil))
+       (insert "\n")))
+    ("model_change"
+     (insert (propertize (format "— model: %s\n" (or (plist-get entry :model) "?"))
+                         'face 'shadow)))
+    (_ nil)))
+
+(defun pi-coding-agent--subagent-render-output (file buffer)
+  "Parse session jsonl FILE and render formatted text into BUFFER.
+Preserves point at end-of-buffer for live tailing when already there."
+  (with-current-buffer buffer
+    (let ((inhibit-read-only t)
+          (at-end (>= (point) (point-max))))
+      (erase-buffer)
+      (condition-case err
+          (with-temp-buffer
+            (insert-file-contents file)
+            (goto-char (point-min))
+            (let ((entries nil))
+              (while (not (eobp))
+                (let ((line (buffer-substring-no-properties
+                             (line-beginning-position) (line-end-position))))
+                  (when (> (length (string-trim line)) 0)
+                    (ignore-errors
+                      (push (json-parse-string line
+                                               :object-type 'plist
+                                               :array-type 'list
+                                               :null-object nil
+                                               :false-object nil)
+                            entries))))
+                (forward-line 1))
+              (setq entries (nreverse entries))
+              (with-current-buffer buffer
+                (dolist (entry entries)
+                  (pi-coding-agent--subagent-render-entry entry)))))
+        (error
+         (insert (propertize (format "Failed to render subagent output: %s\n"
+                                     (error-message-string err))
+                             'face 'pi-coding-agent-error-notice))))
+      (when at-end (goto-char (point-max))))))
+
+(defun pi-coding-agent--subagent-output-refresh (&rest _)
+  "Re-render the subagent output buffer from its session file."
+  (when (and pi-coding-agent--subagent-output-file
+             (file-readable-p pi-coding-agent--subagent-output-file))
+    (pi-coding-agent--subagent-render-output
+     pi-coding-agent--subagent-output-file (current-buffer))))
+
+(defun pi-coding-agent--subagent-output-cleanup ()
+  "Remove the file-notify watch when the output buffer is killed."
+  (when pi-coding-agent--subagent-output-watch
+    (ignore-errors
+      (file-notify-rm-watch pi-coding-agent--subagent-output-watch))
+    (setq pi-coding-agent--subagent-output-watch nil)))
+
+(define-derived-mode pi-coding-agent-subagent-output-mode special-mode
+  "Pi-Subagent"
+  "Major mode for viewing live subagent output rendered from session.jsonl."
+  (buffer-disable-undo)
+  (setq-local truncate-lines nil)
+  (add-hook 'kill-buffer-hook
+            #'pi-coding-agent--subagent-output-cleanup nil t))
+
+(defun pi-coding-agent--open-subagent-output (session-file)
+  "Open SESSION-FILE in a read-only, nicely rendered, live-tailing buffer.
+Returns the buffer.  Signals a `user-error' when SESSION-FILE is missing."
+  (unless (and (stringp session-file) (file-readable-p session-file))
+    (user-error "Subagent session file not available: %s"
+                (or session-file "<none>")))
+  (let ((buf (get-buffer-create
+              (format "*pi-subagent-output:%s*"
+                      (file-name-nondirectory
+                       (directory-file-name
+                        (file-name-directory session-file)))))))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'pi-coding-agent-subagent-output-mode)
+        (pi-coding-agent-subagent-output-mode))
+      (setq pi-coding-agent--subagent-output-file session-file)
+      (pi-coding-agent--subagent-render-output session-file buf)
+      (goto-char (point-max))
+      ;; Live tail: re-render whenever the session file changes.
+      (pi-coding-agent--subagent-output-cleanup)
+      (setq pi-coding-agent--subagent-output-watch
+            (ignore-errors
+              (file-notify-add-watch
+               session-file '(change)
+               #'pi-coding-agent--subagent-output-refresh))))
+    (display-buffer buf)
+    buf))
+
+(defun pi-coding-agent--subagent-button-action (button)
+  "Open the subagent output for BUTTON."
+  (let ((session-file (button-get button 'pi-coding-agent-session-file)))
+    (pi-coding-agent--open-subagent-output session-file)))
+
+(defun pi-coding-agent--insert-subagent-rows (runs depth)
+  "Insert clickable rows for RUNS (each a plist) at indent DEPTH."
+  (dolist (run runs)
+    (let* ((label (pi-coding-agent--subagent-row-label run depth))
+           (session-file (pi-coding-agent--subagent-session-file run)))
+      (if session-file
+          (insert-text-button
+           label
+           'action #'pi-coding-agent--subagent-button-action
+           'follow-link t
+           'help-echo "mouse-1: open subagent output"
+           'pi-coding-agent-session-file session-file)
+        (insert label))
+      (insert "\n")
+      (let ((children (plist-get run :children)))
+        (when children
+          (pi-coding-agent--insert-subagent-rows
+           (if (vectorp children) (append children nil) children)
+           (1+ depth)))))))
+
+(defun pi-coding-agent--render-subagents-list-buffer (chat-buf list-buf)
+  "Render live subagents from CHAT-BUF into LIST-BUF."
+  (let ((runs (buffer-local-value 'pi-coding-agent--subagents chat-buf))
+        (inhibit-read-only t))
+    (with-current-buffer list-buf
+      (special-mode)
+      (setq-local pi-coding-agent--chat-buffer chat-buf)
+      (erase-buffer)
+      (insert "Live subagents\n==============\n\n")
+      (if runs
+          (pi-coding-agent--insert-subagent-rows
+           (if (vectorp runs) (append runs nil) runs) 0)
+        (insert "No running subagents.\n")))))
+
+(defun pi-coding-agent--refresh-subagents-list-buffer ()
+  "Refresh the live subagents list buffer for the current chat session."
+  (when (and pi-coding-agent--subagents-list-buffer
+             (buffer-live-p pi-coding-agent--subagents-list-buffer))
+    (pi-coding-agent--render-subagents-list-buffer
+     (current-buffer) pi-coding-agent--subagents-list-buffer)))
+
+;;;###autoload
+(defun pi-coding-agent-list-subagents ()
+  "Show live subagents for the current pi session.
+Each run is a clickable row; selecting it opens the subagent output in a
+read-only live-tailing buffer."
+  (interactive)
+  (let ((chat-buf (cond
+                   ((derived-mode-p 'pi-coding-agent-chat-mode) (current-buffer))
+                   ((and pi-coding-agent--chat-buffer
+                         (buffer-live-p pi-coding-agent--chat-buffer))
+                    pi-coding-agent--chat-buffer)
+                   (t (user-error "Not in a pi-coding-agent buffer")))))
+    (with-current-buffer chat-buf
+      (let ((buf (get-buffer-create
+                  (format "*pi-coding-agent-subagents:%s*"
+                          (buffer-name chat-buf)))))
+        (setq pi-coding-agent--subagents-list-buffer buf)
+        (pi-coding-agent--render-subagents-list-buffer chat-buf buf)
+        (display-buffer buf `((display-buffer-reuse-window
+                               display-buffer-below-selected)
+                              (window-height
+                               . ,pi-coding-agent-subagents-list-buffer-height)))))))
+
+(defun pi-coding-agent--header-format-widget-group (widgets)
+  "Format live WIDGETS for header-line display."
+  (let ((widget-str (pi-coding-agent--widget-header-string widgets)))
+    (if (and widget-str (not (string-empty-p widget-str)))
+        (concat " │ " widget-str)
+      "")))
+
 (defun pi-coding-agent--header-format-extension-group (ext-status working-message)
   "Format extension group from EXT-STATUS and WORKING-MESSAGE.
 Returns a leading-pipe group string or empty string
@@ -2149,6 +2791,7 @@ Accesses state from the linked chat buffer."
          (stats (and chat-buf (buffer-local-value 'pi-coding-agent--cached-stats chat-buf)))
          (ext-status (and chat-buf (buffer-local-value 'pi-coding-agent--extension-status chat-buf)))
          (working-message (and chat-buf (buffer-local-value 'pi-coding-agent--working-message chat-buf)))
+         (widgets (and chat-buf (buffer-local-value 'pi-coding-agent--widgets chat-buf)))
          (session-name (and chat-buf (buffer-local-value 'pi-coding-agent--session-name chat-buf)))
          (model-obj (plist-get state :model))
          (model-name (cond
@@ -2168,6 +2811,7 @@ Accesses state from the linked chat buffer."
      (pi-coding-agent--header-format-identity model-short thinking activity-phase-str)
      (pi-coding-agent--header-format-stats stats)
      (pi-coding-agent--header-format-context-group session-name)
+     (pi-coding-agent--header-format-widget-group widgets)
      (pi-coding-agent--header-format-extension-group ext-status working-message))))
 
 ;;; State Management

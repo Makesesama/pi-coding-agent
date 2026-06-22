@@ -2141,6 +2141,182 @@ since we don't display them locally. Let pi's message_start handle it."
        :message nil))
     (should (null pi-coding-agent--working-message))))
 
+
+(ert-deftest pi-coding-agent-test-extension-ui-set-widget ()
+  "extension_ui_request setWidget stores live widget lines."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--widgets nil)
+    (pi-coding-agent--handle-extension-ui-request
+     '(:type "extension_ui_request"
+       :id "req-widget"
+       :method "setWidget"
+       :widgetKey "subagents"
+       :widgetLines ["⠋ scout running" "reviewer queued"]
+       :widgetPlacement "aboveEditor"))
+    (let ((widget (cdr (assoc "subagents" pi-coding-agent--widgets))))
+      (should widget)
+      (should (equal (plist-get widget :lines)
+                     '("⠋ scout running" "reviewer queued")))
+      (should (equal (plist-get widget :placement) "aboveEditor")))))
+
+(ert-deftest pi-coding-agent-test-extension-ui-set-widget-updates-key ()
+  "extension_ui_request setWidget replaces an existing widget by key."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--widgets nil)
+    (pi-coding-agent--handle-extension-ui-request
+     '(:type "extension_ui_request"
+       :id "req-widget-1"
+       :method "setWidget"
+       :widgetKey "subagents"
+       :widgetLines ["old"]))
+    (pi-coding-agent--handle-extension-ui-request
+     '(:type "extension_ui_request"
+       :id "req-widget-2"
+       :method "setWidget"
+       :widgetKey "subagents"
+       :widgetLines ["new"]))
+    (should (= (length pi-coding-agent--widgets) 1))
+    (should (equal (plist-get (cdr (assoc "subagents" pi-coding-agent--widgets)) :lines)
+                   '("new")))))
+
+(ert-deftest pi-coding-agent-test-extension-ui-set-widget-clear ()
+  "extension_ui_request setWidget with omitted lines clears widget."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--widgets
+          '(("subagents" . (:key "subagents" :lines ("running")))))
+    (pi-coding-agent--handle-extension-ui-request
+     '(:type "extension_ui_request"
+       :id "req-widget-clear"
+       :method "setWidget"
+       :widgetKey "subagents"))
+    (should-not (assoc "subagents" pi-coding-agent--widgets))))
+
+(ert-deftest pi-coding-agent-test-extension-ui-set-widget-strips-ansi ()
+  "extension_ui_request setWidget strips ANSI escape codes from lines."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--widgets nil)
+    (pi-coding-agent--handle-extension-ui-request
+     '(:type "extension_ui_request"
+       :id "req-widget-ansi"
+       :method "setWidget"
+       :widgetKey "subagents"
+       :widgetLines ["\e[38;5;39m⠋ scout running\e[39m"]))
+    (should (equal (plist-get (cdr (assoc "subagents" pi-coding-agent--widgets)) :lines)
+                   '("⠋ scout running")))))
+
+(ert-deftest pi-coding-agent-test-extension-ui-subagents-state-parsed ()
+  "Reserved subagents-state widget key is parsed into structured state."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--widgets nil
+          pi-coding-agent--subagents nil)
+    (pi-coding-agent--handle-extension-ui-request
+     (list :type "extension_ui_request"
+           :id "req-state"
+           :method "setWidget"
+           :widgetKey "pi-subagents-state"
+           :widgetLines
+           (vector (concat "{\"runs\":[{\"id\":\"run-1\","
+                           "\"agents\":[\"scout\"],\"status\":\"running\","
+                           "\"sessionFile\":\"/tmp/s/session.jsonl\","
+                           "\"turnCount\":3}]}"))))
+    ;; Parsed into structured state, NOT into the generic widget alist.
+    (should-not pi-coding-agent--widgets)
+    (let ((run (car pi-coding-agent--subagents)))
+      (should run)
+      (should (equal (plist-get run :id) "run-1"))
+      (should (equal (plist-get run :agents) '("scout")))
+      (should (equal (plist-get run :status) "running"))
+      (should (equal (plist-get run :sessionFile) "/tmp/s/session.jsonl"))
+      (should (equal (plist-get run :turnCount) 3)))))
+
+(ert-deftest pi-coding-agent-test-extension-ui-subagents-state-clear ()
+  "Reserved subagents-state widget with omitted lines clears state."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--subagents '((:id "run-1" :status "running")))
+    (pi-coding-agent--handle-extension-ui-request
+     '(:type "extension_ui_request"
+       :id "req-state-clear"
+       :method "setWidget"
+       :widgetKey "pi-subagents-state"))
+    (should-not pi-coding-agent--subagents)))
+
+(ert-deftest pi-coding-agent-test-extension-ui-subagents-state-malformed ()
+  "Malformed subagents-state JSON is ignored without error."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--subagents '((:id "old")))
+    (cl-letf (((symbol-function 'message) (lambda (&rest _) nil)))
+      (pi-coding-agent--handle-extension-ui-request
+       '(:type "extension_ui_request"
+         :id "req-state-bad"
+         :method "setWidget"
+         :widgetKey "pi-subagents-state"
+         :widgetLines ["{not valid json"])))
+    ;; Malformed payload yields empty state, not a crash.
+    (should-not pi-coding-agent--subagents)))
+
+(ert-deftest pi-coding-agent-test-subagents-state-nested-children ()
+  "Nested children are parsed and projected from subagents-state."
+  (with-temp-buffer
+    (pi-coding-agent-chat-mode)
+    (setq pi-coding-agent--subagents nil)
+    (pi-coding-agent--update-subagents
+     (list (concat "{\"runs\":[{\"id\":\"chain-1\",\"agents\":[\"planner\"],"
+                   "\"status\":\"running\",\"children\":["
+                   "{\"id\":\"c-a\",\"agent\":\"worker\",\"status\":\"running\","
+                   "\"sessionFile\":\"/tmp/c-a/session.jsonl\"}]}]}")))
+    (let* ((run (car pi-coding-agent--subagents))
+           (children (plist-get run :children))
+           (child (car children)))
+      (should (equal (plist-get run :id) "chain-1"))
+      (should (equal (plist-get child :id) "c-a"))
+      (should (equal (plist-get child :agent) "worker"))
+      (should (equal (plist-get child :sessionFile) "/tmp/c-a/session.jsonl")))))
+
+(ert-deftest pi-coding-agent-test-subagent-session-file-derivation ()
+  "Session file is derived from :sessionDir when :sessionFile is absent."
+  (should (equal (pi-coding-agent--subagent-session-file
+                  '(:sessionFile "/a/session.jsonl"))
+                 "/a/session.jsonl"))
+  (should (equal (pi-coding-agent--subagent-session-file
+                  '(:sessionDir "/a/run-0"))
+                 (expand-file-name "session.jsonl" "/a/run-0")))
+  (should-not (pi-coding-agent--subagent-session-file '(:id "x"))))
+
+(ert-deftest pi-coding-agent-test-subagents-list-buffer-renders-rows ()
+  "The subagents list buffer renders a clickable row per run."
+  (let ((chat-buf (generate-new-buffer "*test-subagents-chat*"))
+        (list-buf (generate-new-buffer "*test-subagents-list*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer chat-buf
+            (pi-coding-agent-chat-mode)
+            (setq pi-coding-agent--subagents
+                  '((:id "run-1" :agents ("scout") :status "running"
+                     :sessionFile "/tmp/s/session.jsonl" :currentTool "read"))))
+          (pi-coding-agent--render-subagents-list-buffer chat-buf list-buf)
+          (with-current-buffer list-buf
+            (goto-char (point-min))
+            (should (search-forward "scout" nil t))
+            (should (search-forward "running" nil t))
+            ;; A clickable button carrying the session file should exist.
+            (let ((found nil))
+              (goto-char (point-min))
+              (while (and (not found)
+                          (setq found (next-button (point))))
+                (when (equal (button-get found 'pi-coding-agent-session-file)
+                             "/tmp/s/session.jsonl")
+                  (setq found t)))
+              (should found))))
+      (kill-buffer chat-buf)
+      (kill-buffer list-buf))))
+
 (ert-deftest pi-coding-agent-test-extension-ui-unsupported-warns ()
   "Unsupported extension_ui_request method warns via `message'.
 See https://github.com/dnouri/pi-coding-agent/issues/176."
