@@ -932,6 +932,19 @@ Shows success or final failure with raw error."
             (assoc-delete-all key pi-coding-agent--extension-status)))
     (force-mode-line-update t)))
 
+(defun pi-coding-agent--extension-ui-set-widget (event)
+  "Handle setWidget method from EVENT.
+
+The reserved `pi-coding-agent--subagents-widget-key' is intercepted and parsed
+into structured subagent run state instead of being shown as a generic widget."
+  (let ((key (plist-get event :widgetKey))
+        (lines (pi-coding-agent--widget-lines-from-event
+                (plist-get event :widgetLines))))
+    (if (equal (format "%s" key) pi-coding-agent--subagents-widget-key)
+        (pi-coding-agent--update-subagents lines)
+      (pi-coding-agent--widget-upsert
+       key lines (plist-get event :widgetPlacement)))))
+
 (defun pi-coding-agent--extension-ui-set-working-message (event)
   "Handle setWorkingMessage method from EVENT."
   (let ((msg (plist-get event :message)))
@@ -983,6 +996,7 @@ Dispatches to appropriate handler based on method."
       ("input"          (pi-coding-agent--extension-ui-input event proc))
       ("set_editor_text" (pi-coding-agent--extension-ui-set-editor-text event))
       ("setStatus"      (pi-coding-agent--extension-ui-set-status event))
+      ("setWidget"      (pi-coding-agent--extension-ui-set-widget event))
       ("setWorkingMessage" (pi-coding-agent--extension-ui-set-working-message event))
       (_                (pi-coding-agent--extension-ui-unsupported event proc)))))
 

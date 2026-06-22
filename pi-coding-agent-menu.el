@@ -354,6 +354,7 @@ Call this when starting a new session to ensure no stale state persists."
         pi-coding-agent--local-user-message nil
         pi-coding-agent--extension-status nil
         pi-coding-agent--working-message nil
+        pi-coding-agent--subagents nil
         pi-coding-agent--pre-compaction-status nil
         pi-coding-agent--in-code-block nil
         pi-coding-agent--in-thinking-block nil
@@ -1171,7 +1172,8 @@ Uses commands from pi's `get_commands' RPC."
     (pi-coding-agent-menu-default-thinking-display)]
    ["Info"
     ("i" "stats" pi-coding-agent-session-stats)
-    ("y" "copy last" pi-coding-agent-copy-last-message)]])
+    ("y" "copy last" pi-coding-agent-copy-last-message)
+    ("b" "subagents" pi-coding-agent-list-subagents)]])
 
 (defun pi-coding-agent-refresh-commands ()
   "Refresh commands from pi via RPC."
