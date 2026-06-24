@@ -2174,6 +2174,33 @@ This ensures history loads correctly when callback runs in arbitrary context."
       (delete-file temp-file)
       (delete-directory project-dir t))))
 
+(ert-deftest pi-coding-agent-test-session-metadata-accepts-type-after-other-keys ()
+  "Session metadata handles small records whose type key is not first."
+  (let ((temp-file (make-temp-file "pi-coding-agent-test-session" nil ".jsonl"))
+        (project-dir (pi-coding-agent-test--make-temp-directory
+                      "pi-coding-agent-test-project-")))
+    (unwind-protect
+        (let ((cwd (directory-file-name project-dir)))
+          (with-temp-file temp-file
+            (insert (json-encode `(:id "test" :type "session" :cwd ,cwd)) "\n")
+            (insert (json-encode '(:id "m1" :type "message"
+                                   :message (:role "user"
+                                             :content [(:type "text"
+                                                       :text "Hello")]))))
+            (insert "\n")
+            (insert (json-encode '(:id "si1" :type "session_info"
+                                   :name "Named session")))
+            (insert "\n"))
+          (let ((metadata (pi-coding-agent--session-metadata temp-file)))
+            (should metadata)
+            (should (equal (plist-get metadata :cwd) cwd))
+            (should (equal (plist-get metadata :first-message) "Hello"))
+            (should (equal (plist-get metadata :message-count) 1))
+            (should (equal (plist-get metadata :session-name)
+                           "Named session"))))
+      (delete-file temp-file)
+      (delete-directory project-dir t))))
+
 (ert-deftest pi-coding-agent-test-session-metadata-returns-nil-for-empty-file ()
   "pi-coding-agent--session-metadata returns nil for empty or invalid files."
   (let ((temp-file (make-temp-file "pi-coding-agent-test-session" nil ".jsonl")))
@@ -2273,6 +2300,20 @@ This ensures history loads correctly when callback runs in arbitrary context."
             (should (string-match-p "My Project" (car choice)))
             (should-not (string-match-p "Hello world" (car choice)))))
       (delete-file temp-file))))
+
+(ert-deftest pi-coding-agent-test-format-session-choice-reuses-metadata ()
+  "pi-coding-agent--format-session-choice need not rescan a listed session."
+  (cl-letf (((symbol-function 'pi-coding-agent--session-metadata)
+             (lambda (_path)
+               (ert-fail "session metadata was rescanned"))))
+    (let* ((path "/tmp/session.jsonl")
+           (metadata (list :modified-time (current-time)
+                           :session-name "Cached name"
+                           :message-count 12))
+           (choice (pi-coding-agent--format-session-choice path metadata)))
+      (should (equal (cdr choice) path))
+      (should (string-match-p "Cached name" (car choice)))
+      (should (string-match-p "12 msgs" (car choice))))))
 
 (ert-deftest pi-coding-agent-test-header-line-includes-session-name ()
   "pi-coding-agent--header-line-string includes session name when set."
