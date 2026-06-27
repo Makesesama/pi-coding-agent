@@ -3699,24 +3699,53 @@ This occurs after compaction before the next assistant message."
 
 (ert-deftest pi-coding-agent-test-paste-image-from-clipboard-inserts-file-reference ()
   "Pasting a clipboard image inserts an @file reference at point."
-  (with-temp-buffer
-    (pi-coding-agent-input-mode)
-    (insert "Describe")
-    (cl-letf (((symbol-function 'pi-coding-agent--clipboard-image-type)
-               (lambda () '("image/png" . ".png")))
-              ((symbol-function 'pi-coding-agent--clipboard-image-data)
-               (lambda (mime-type)
-                 (should (equal mime-type "image/png"))
-                 "PNG DATA"))
-              ((symbol-function 'pi-coding-agent--write-clipboard-image)
-               (lambda (data extension)
-                 (should (equal data "PNG DATA"))
-                 (should (equal extension ".png"))
-                 "/tmp/pi-coding-agent-image-test.png"))
-              ((symbol-function 'message) #'ignore))
-      (pi-coding-agent-paste-image-from-clipboard)
-      (should (equal (buffer-string)
-                     "Describe @/tmp/pi-coding-agent-image-test.png")))))
+  (let ((pi-coding-agent-input-markdown-highlighting nil))
+    (with-temp-buffer
+      (pi-coding-agent-input-mode)
+      (insert "Describe")
+      (cl-letf (((symbol-function 'pi-coding-agent--clipboard-image-type)
+                 (lambda () '("image/png" . ".png")))
+                ((symbol-function 'pi-coding-agent--clipboard-image-data)
+                 (lambda (mime-type)
+                   (should (equal mime-type "image/png"))
+                   "PNG DATA"))
+                ((symbol-function 'pi-coding-agent--write-clipboard-image)
+                 (lambda (data extension)
+                   (should (equal data "PNG DATA"))
+                   (should (equal extension ".png"))
+                   "/tmp/pi-coding-agent-image-test.png"))
+                ((symbol-function 'message) #'ignore))
+        (pi-coding-agent-paste-image-from-clipboard)
+        (should (equal (buffer-string)
+                       "Describe @/tmp/pi-coding-agent-image-test.png"))))))
+
+(ert-deftest pi-coding-agent-test-write-clipboard-image-defaults-to-session-pi-directory ()
+  "Clipboard images are saved below the session directory by default."
+  (let* ((session-dir (make-temp-file "pi-coding-agent-image-session-" t))
+         (pi-coding-agent-image-clipboard-directory nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'pi-coding-agent--session-directory)
+                   (lambda () session-dir)))
+          (let ((file (pi-coding-agent--write-clipboard-image "PNG DATA" ".png")))
+            (should (string-prefix-p
+                     (expand-file-name ".pi/clipboard-images/" session-dir)
+                     file))
+            (should (file-exists-p file))
+            (should (equal (pi-coding-agent--file-reference-path file)
+                           (file-relative-name file session-dir)))))
+      (delete-directory session-dir t))))
+
+(ert-deftest pi-coding-agent-test-file-reference-path-keeps-external-files-absolute ()
+  "Files outside the session directory keep absolute @file references."
+  (let* ((session-dir (make-temp-file "pi-coding-agent-image-session-" t))
+         (external-file (make-temp-file "pi-coding-agent-image-external-" nil ".png")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'pi-coding-agent--session-directory)
+                   (lambda () session-dir)))
+          (should (equal (pi-coding-agent--file-reference-path external-file)
+                         external-file)))
+      (delete-directory session-dir t)
+      (delete-file external-file))))
 
 (ert-deftest pi-coding-agent-test-paste-image-keybinding ()
   "Input mode binds C-c C-i to image clipboard paste."
