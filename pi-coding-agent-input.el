@@ -70,12 +70,18 @@ Each entry is (MIME-TYPE . FILE-EXTENSION), checked in order."
   :type '(alist :key-type string :value-type string)
   :group 'pi-coding-agent)
 
-(defcustom pi-coding-agent-image-clipboard-directory temporary-file-directory
+(defcustom pi-coding-agent-image-clipboard-directory nil
   "Directory where clipboard images are saved before insertion.
-When nil, use `temporary-file-directory'."
-  :type '(choice (const :tag "Use temporary-file-directory" nil)
+When nil, save images below `.pi/clipboard-images' in the current Pi
+session directory so the jailed agent can read them.  If set to a directory
+outside the session directory, inserted @file references use absolute paths."
+  :type '(choice (const :tag "Use .pi/clipboard-images in session directory" nil)
                  directory)
   :group 'pi-coding-agent)
+
+(defconst pi-coding-agent--image-clipboard-default-subdirectory
+  ".pi/clipboard-images"
+  "Session-relative directory used for pasted clipboard images.")
 
 (defun pi-coding-agent--clipboard-command ()
   "Return the configured clipboard command, or signal a user error."
@@ -112,16 +118,39 @@ When nil, use `temporary-file-directory'."
           (user-error "%s --type %s did not return image data" command mime-type)))
       (buffer-string))))
 
+(defun pi-coding-agent--image-clipboard-directory ()
+  "Return the directory where clipboard images should be saved."
+  (let ((dir (file-name-as-directory
+              (expand-file-name
+               (or pi-coding-agent-image-clipboard-directory
+                   pi-coding-agent--image-clipboard-default-subdirectory)
+               (pi-coding-agent--session-directory)))))
+    (make-directory dir t)
+    dir))
+
 (defun pi-coding-agent--write-clipboard-image (data extension)
   "Write raw image DATA to a temporary file with EXTENSION and return its path."
-  (let* ((dir (file-name-as-directory
-               (expand-file-name (or pi-coding-agent-image-clipboard-directory
-                                     temporary-file-directory))))
+  (let* ((dir (pi-coding-agent--image-clipboard-directory))
          (file (make-temp-file (expand-file-name "pi-coding-agent-image-" dir)
                                nil extension))
          (coding-system-for-write 'binary))
     (write-region data nil file nil 'silent)
     file))
+
+(defun pi-coding-agent--file-reference-path (file)
+  "Return the @file reference path for FILE.
+Files inside the session directory are returned relative to that directory so
+jailed Pi processes can resolve them from their working directory.  Files
+outside the session directory are returned as absolute paths."
+  (let* ((absolute-file (expand-file-name file))
+         (session-dir (file-name-as-directory
+                       (expand-file-name (pi-coding-agent--session-directory))))
+         (relative (file-relative-name absolute-file session-dir)))
+    (if (or (string-prefix-p "../" relative)
+            (string= relative "..")
+            (file-name-absolute-p relative))
+        absolute-file
+      relative)))
 
 (defun pi-coding-agent--insert-file-reference (file)
   "Insert an @FILE reference at point, adding spacing when helpful."
@@ -139,9 +168,10 @@ prompt as needed, then send normally with `pi-coding-agent-send'."
   (interactive)
   (pcase-let* ((`(,mime-type . ,extension) (pi-coding-agent--clipboard-image-type))
                (data (pi-coding-agent--clipboard-image-data mime-type))
-               (file (pi-coding-agent--write-clipboard-image data extension)))
-    (pi-coding-agent--insert-file-reference file)
-    (message "Pi: Inserted clipboard image reference %s" file)))
+               (file (pi-coding-agent--write-clipboard-image data extension))
+               (reference (pi-coding-agent--file-reference-path file)))
+    (pi-coding-agent--insert-file-reference reference)
+    (message "Pi: Inserted clipboard image reference %s" reference)))
 
 ;;;; Input History (comint/eshell style)
 
