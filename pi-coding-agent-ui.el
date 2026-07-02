@@ -1873,7 +1873,7 @@ warnings for missing dependencies."
 
 ;;;; Startup Header
 
-(defconst pi-coding-agent-version "2.5.2"
+(defconst pi-coding-agent-version "2.6.0"
   "Version of pi-coding-agent.")
 
 (defconst pi-coding-agent--version-probe-delay 0.1
