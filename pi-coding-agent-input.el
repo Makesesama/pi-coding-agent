@@ -367,13 +367,13 @@ markup visibility, mode identity, and keybindings.  Set
 `pi-coding-agent-input-markdown-highlighting' to nil for plain text."
   :group 'pi-coding-agent
   (when pi-coding-agent-input-markdown-highlighting
-    (md-ts-mode)
+    (markdown-ts-mode)
     (setq major-mode 'pi-coding-agent-input-mode)
     (setq mode-name "Pi-Input")
     (use-local-map pi-coding-agent-input-mode-map)
     ;; Users see exactly what they type — never hide markup in input.
-    (setq-local md-ts-hide-markup nil)
-    (md-ts--set-hide-markup nil))
+    (setq-local markdown-ts-hide-markup nil)
+    (markdown-ts--set-hide-markup nil))
   (setq-local header-line-format '(:eval (pi-coding-agent--header-line-string)))
   (setq-local mode-line-process '(:eval (pi-coding-agent--status-mode-line-string)))
   ;; Reset inherited completions (text-mode adds ispell, etc.) — our

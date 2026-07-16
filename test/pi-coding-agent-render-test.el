@@ -1495,10 +1495,10 @@ and DISPLAY controls how completed thinking is rendered."
 ;;; Syntax Highlighting
 
 (ert-deftest pi-coding-agent-test-chat-mode-derives-from-markdown-ts ()
-  "Chat mode derives from md-ts-mode for tree-sitter highlighting."
+  "Chat mode derives from built-in markdown-ts-mode."
   (with-temp-buffer
     (pi-coding-agent-chat-mode)
-    (should (derived-mode-p 'md-ts-mode))))
+    (should (derived-mode-p 'markdown-ts-mode))))
 
 (ert-deftest pi-coding-agent-test-chat-mode-fontifies-code ()
   "Code blocks get syntax highlighting from tree-sitter.
@@ -5557,7 +5557,7 @@ authoritative args, header and overlay path are updated."
 
 (ert-deftest pi-coding-agent-test-toolcall-delta-uses-fenced-code-block ()
   "Streaming write content is wrapped in a markdown fenced code block.
-The fences enable md-ts-mode language injection for syntax highlighting."
+The fences enable markdown-ts-mode language injection for syntax highlighting."
   (pi-coding-agent-test--with-toolcall "write" '(:path "/tmp/foo.py")
     (pi-coding-agent-test--send-delta
      "write" '(:path "/tmp/foo.py" :content "def hello():\n    print('hi')\n"))
@@ -5603,7 +5603,7 @@ In batch tests, we call `font-lock-ensure' explicitly."
 
 (ert-deftest pi-coding-agent-test-toolcall-delta-fenced-prevents-markdown-bold ()
   "Fenced code block protects __init__ from markdown bold.
-Streaming write content is wrapped in markdown fences; md-ts-mode
+Streaming write content is wrapped in markdown fences; markdown-ts-mode
 parses it as a code block (language injection), not inline markdown."
   (pi-coding-agent-test--with-toolcall "write" '(:path "/tmp/foo.py")
     (pi-coding-agent-test--send-delta
@@ -6509,7 +6509,7 @@ Commands with embedded newlines should not have any lines deleted."
       (should-not (search-forward "```thinking" nil t)))))
 
 (ert-deftest pi-coding-agent-test-thinking-blockquote-has-face ()
-  "Thinking blockquote has md-ts-block-quote after font-lock."
+  "Thinking blockquote has markdown-ts-block-quote after font-lock."
   (with-temp-buffer
     (pi-coding-agent-chat-mode)
     (let ((inhibit-read-only t))
@@ -6517,10 +6517,10 @@ Commands with embedded newlines should not have any lines deleted."
     (font-lock-ensure)
     (goto-char (point-min))
     (search-forward "Some thinking")
-    ;; Verify md-ts-block-quote is applied (may be in a list with other faces)
+    ;; Verify the blockquote face is applied (possibly in a face list).
     (let ((face (get-text-property (point) 'face)))
-      (should (or (eq face 'md-ts-block-quote)
-                  (and (listp face) (memq 'md-ts-block-quote face)))))))
+      (should (or (eq face 'markdown-ts-block-quote)
+                  (and (listp face) (memq 'markdown-ts-block-quote face)))))))
 
 (ert-deftest pi-coding-agent-test-thinking-multiline-blockquote ()
   "Multi-line thinking content has > prefix on each line."
@@ -6671,7 +6671,7 @@ Inner backtick fences in read output must not affect later wrappers."
                (all-hidden t)
                (pos line-start))
           (while (< pos line-end)
-            (unless (eq (get-char-property pos 'invisible) 'md-ts--markup)
+            (unless (eq (get-char-property pos 'invisible) 'markdown-ts--markup)
               (setq all-hidden nil))
             (setq pos (1+ pos)))
           (push all-hidden wrapper-openers)))
@@ -6714,10 +6714,10 @@ Inner backtick fences in read output must not affect later wrappers."
                (star-pos (+ line-start 2))
                (line-face (get-text-property line-start 'face))
                (review-face (get-text-property review-pos 'face)))
-          (should (or (eq line-face 'md-ts-block-quote)
+          (should (or (eq line-face 'markdown-ts-block-quote)
                       (and (listp line-face)
-                           (memq 'md-ts-block-quote line-face))))
-          (should (eq (get-text-property star-pos 'invisible) 'md-ts--markup))
+                           (memq 'markdown-ts-block-quote line-face))))
+          (should (eq (get-text-property star-pos 'invisible) 'markdown-ts--markup))
           (should (or (eq review-face 'bold)
                       (and (listp review-face)
                            (memq 'bold review-face)))))))))
@@ -6762,9 +6762,9 @@ as plain tool output."
         (should (string-prefix-p "> "
                                  (buffer-substring-no-properties
                                   line-start (line-end-position))))
-        (should (or (eq line-face 'md-ts-block-quote)
+        (should (or (eq line-face 'markdown-ts-block-quote)
                     (and (listp line-face)
-                         (memq 'md-ts-block-quote line-face))))
+                         (memq 'markdown-ts-block-quote line-face))))
         ;; With range settings active, the inline parser is scoped to
         ;; inline nodes.  After a setext heading, bold face may not apply
         ;; (known limitation: inline nodes depend on tree structure).
@@ -6772,9 +6772,9 @@ as plain tool output."
         (should (or (eq review-face 'bold)
                     (and (listp review-face)
                          (memq 'bold review-face))
-                    (eq review-face 'md-ts-block-quote)
+                    (eq review-face 'markdown-ts-block-quote)
                     (and (listp review-face)
-                         (memq 'md-ts-block-quote review-face))))))))
+                         (memq 'markdown-ts-block-quote review-face))))))))
 
 (ert-deftest pi-coding-agent-test-write-tool-gets-syntax-highlighting ()
   "Write tool displays content from args with syntax highlighting.
@@ -6805,7 +6805,7 @@ which is just a success message."
 
 (ert-deftest pi-coding-agent-test-streaming-fires-modification-hooks ()
   "Streaming delta lets modification hooks fire for jit-lock fontification.
-With md-ts-mode (tree-sitter), jit-lock-after-change is cheap (~0.7µs)
+With markdown-ts-mode (tree-sitter), jit-lock-after-change is cheap (~0.7µs)
 and marks inserted text for fontification at the next redisplay."
   (let ((hook-called nil))
     (cl-flet ((test-hook (beg end len) (setq hook-called t)))
@@ -6834,7 +6834,7 @@ inserted text for fontification at the next redisplay."
 
 (ert-deftest pi-coding-agent-test-tool-update-fires-modification-hooks ()
   "Tool update lets modification hooks fire for jit-lock fontification.
-With md-ts-mode (tree-sitter), the cost is negligible."
+With markdown-ts-mode (tree-sitter), the cost is negligible."
   (let ((hook-called nil))
     (cl-flet ((test-hook (beg end len) (setq hook-called t)))
       (with-temp-buffer

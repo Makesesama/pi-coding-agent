@@ -4,7 +4,7 @@ description: Install a pinned Emacs build for CI.
 
 inputs:
   version:
-    description: Emacs version to install, such as 29.4, 30.1, or snapshot.
+    description: Emacs version to install, such as 31.1 or snapshot.
     required: true
 runs:
   using: composite

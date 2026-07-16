@@ -22,20 +22,12 @@
 
 ;;; Commentary:
 
-;; Tree-sitter grammar recipes and installation helpers for Emacs 29+.
+;; Tree-sitter grammar recipes and installation helpers for Emacs 31+.
 ;;
-;; All built-in `-ts-mode's (python-ts-mode, bash-ts-mode, etc.) are
-;; available on Emacs 29, 30, and 31.  The modes are there; the
-;; *grammars* (compiled .so files) are what users need to install.
-;;
-;; On Emacs 29/30, `treesit-language-source-alist' starts empty — users
-;; have no way to install grammars without knowing Git URLs.  This file
-;; registers version-pinned recipes so `treesit-install-language-grammar'
-;; works out of the box.
-;;
-;; On Emacs 31, `treesit-ensure-installed' handles grammars natively for
-;; modes that register recipes.  Our entries serve as fallbacks for modes
-;; that don't (add-to-list with APPEND preserves user/mode entries).
+;; Built-in tree-sitter modes provide the modes themselves, but users still
+;; need the compiled grammar libraries.  These version-pinned recipes let
+;; `treesit-install-language-grammar' install Markdown and optional embedded
+;; language grammars without requiring users to find the source URLs.
 
 ;;; Code:
 
@@ -87,9 +79,7 @@ Each entry is (LANG URL REVISION [SOURCE-DIR]).")
           pi-coding-agent-optional-grammar-recipes)
   "All tree-sitter grammar recipes needed by pi-coding-agent.")
 
-;; Register recipes so `M-x treesit-install-language-grammar' works
-;; on Emacs 29/30 (which ship with zero recipes).  Use APPEND so user
-;; entries and Emacs 31 mode-registered entries take precedence.
+;; Use APPEND so user and built-in mode recipes take precedence.
 (dolist (recipe pi-coding-agent-grammar-recipes)
   (add-to-list 'treesit-language-source-alist recipe t))
 

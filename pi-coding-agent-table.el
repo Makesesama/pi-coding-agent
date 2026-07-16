@@ -122,20 +122,9 @@ visible after streaming while hidden."
 
 ;;;; Tree-Sitter Detection
 
-;; Tell the Emacs 29 byte compiler about the Emacs 30 signature so
-;; calls with the LANGUAGE argument don't trigger arity warnings.
-;; Same pattern as md-ts-mode.
-(declare-function treesit-parser-list "treesit.c"
-  (&optional buffer language))
-
 (defun pi-coding-agent--markdown-parser ()
-  "Return the first markdown tree-sitter parser for the current buffer.
-On Emacs 30+ this uses the LANGUAGE argument of `treesit-parser-list'.
-On Emacs 29, which lacks that parameter, we filter manually."
-  (if (>= emacs-major-version 30)
-      (car (treesit-parser-list (current-buffer) 'markdown))
-    (cl-find 'markdown (treesit-parser-list)
-             :key #'treesit-parser-language)))
+  "Return the first markdown tree-sitter parser for the current buffer."
+  (car (treesit-parser-list (current-buffer) 'markdown)))
 
 (defvar pi-coding-agent--treesit-table-query nil
   "Pre-compiled tree-sitter query for pipe_table nodes.")
@@ -247,9 +236,9 @@ Returns (PREFIX . BARE), where PREFIX is everything before the first `|'."
     (setq pi-coding-agent--visible-string-buffer
           (generate-new-buffer " *pi-visible-string*"))
     (with-current-buffer pi-coding-agent--visible-string-buffer
-      (md-ts-mode)
-      (setq-local md-ts-hide-markup t)
-      (md-ts--set-hide-markup t)))
+      (markdown-ts-mode)
+      (setq-local markdown-ts-hide-markup t)
+      (markdown-ts--set-hide-markup t)))
   pi-coding-agent--visible-string-buffer)
 
 (defconst pi-coding-agent--markdown-inline-chars-re "[*_`~\\[]"
@@ -270,7 +259,7 @@ Cells with no inline syntax characters are returned as-is."
         (erase-buffer)
         (insert markdown))
       ;; Guard against treesit-query-error or other font-lock failures
-      ;; (e.g. md-ts-mode query incompatibility with tree-sitter 0.26+).
+      ;; (e.g. a Markdown query incompatible with the tree-sitter runtime).
       ;; On failure, fall back to the raw markdown string, but still let
       ;; `debug-on-error' surface the original failure when requested.
       (condition-case-unless-debug nil
@@ -535,7 +524,7 @@ Walks each `face' span, resolves the effective visual attributes
 anonymous spec.  Font-identity attributes (:family, :foundry, :width,
 :height) are omitted so the buffer's default font governs rendering.
 This prevents column misalignment in GUI Emacs when inline markdown
-faces like `md-ts-code' inherit from `fixed-pitch'."
+faces like `markdown-ts-code-span' inherit from `fixed-pitch'."
   (let ((result (copy-sequence str))
         (pos 0)
         (len (length str)))

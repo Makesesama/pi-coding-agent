@@ -4211,7 +4211,7 @@ display-agent-end must finalize the pending overlay with error face."
 
 ;;; Input Mode — Markdown Highlighting
 
-(ert-deftest pi-coding-agent-test-input-mode-md-ts-by-default ()
+(ert-deftest pi-coding-agent-test-input-mode-markdown-ts-by-default ()
   "By default, input mode has tree-sitter markdown font-lock."
   (with-temp-buffer
     (pi-coding-agent-input-mode)
@@ -4240,18 +4240,18 @@ no spurious faces are applied to plain colon-ending lines."
 (ert-deftest pi-coding-agent-test-input-mode-no-hidden-markup ()
   "Input mode does NOT hide markup, even when user customizes it globally."
   (with-temp-buffer
-    (let ((old-default (default-value 'md-ts-hide-markup)))
+    (let ((old-default (default-value 'markdown-ts-hide-markup)))
       (unwind-protect
           (progn
-            (setq-default md-ts-hide-markup t)
+            (setq-default markdown-ts-hide-markup t)
             (pi-coding-agent-input-mode)
-            (should-not md-ts-hide-markup)
+            (should-not markdown-ts-hide-markup)
             (insert "some **bold** text")
             (font-lock-ensure)
             (goto-char (point-min))
             (search-forward "**")
             (should-not (get-text-property (1- (point)) 'invisible)))
-        (setq-default md-ts-hide-markup old-default)))))
+        (setq-default markdown-ts-hide-markup old-default)))))
 
 (ert-deftest pi-coding-agent-test-input-mode-no-fontification-without-markdown ()
   "Without markdown highlighting, bold text gets no bold face."

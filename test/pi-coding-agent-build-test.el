@@ -16,7 +16,6 @@
 (ert-deftest pi-coding-agent-test-build-package-requirements-follow-package-header ()
   "Read dependency versions from the package header, excluding Emacs itself."
   (should (equal '((transient . (0 9 0))
-                   (md-ts-mode . (0 3 0))
                    (markdown-table-wrap . (0 2 0)))
                  (pi-coding-agent-build-package-requirements))))
 
@@ -40,12 +39,12 @@
         (refreshed nil)
         (installed nil)
         (installed-state '((transient . nil)
-                           (md-ts-mode . t))))
+                           (markdown-table-wrap . t))))
     (cl-letf (((symbol-function 'package-initialize) #'ignore)
               ((symbol-function 'package-refresh-contents)
                (lambda ()
                  (setq refreshed t)
-                 (setq package-archive-contents '((transient) (md-ts-mode)))))
+                 (setq package-archive-contents '((transient) (markdown-table-wrap)))))
               ((symbol-function 'package-installed-p)
                (lambda (package &optional _min-version)
                  (alist-get package installed-state)))
@@ -55,7 +54,7 @@
                  (setf (alist-get package installed-state) t))))
       (pi-coding-agent-build-install-deps
        '((transient . (0 9 0))
-         (md-ts-mode . (0 3 0))))
+         (markdown-table-wrap . (0 2 0))))
       (should package-install-upgrade-built-in)
       (should refreshed)
       (should (equal '(transient) (nreverse installed)))
@@ -79,10 +78,10 @@
                 (progn
                   (pi-coding-agent-build-install-deps
                    '((transient . (0 9 0))
-                     (md-ts-mode . (0 3 0))))
+                     (markdown-table-wrap . (0 2 0))))
                   nil)
               (error (error-message-string err))))
-      (should (string-match-p "md-ts-mode" message-text)))))
+      (should (string-match-p "markdown-table-wrap" message-text)))))
 
 (ert-deftest pi-coding-agent-test-build-install-grammars-reports-ready-and-installed-counts ()
   "Count already-ready and newly installed grammars separately."

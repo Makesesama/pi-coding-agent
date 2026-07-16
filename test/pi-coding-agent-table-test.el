@@ -94,7 +94,7 @@
 
 (ert-deftest pi-coding-agent-test-table-overlays-have-no-font-faces ()
   "Table display overlays carry no font-changing face attributes.
-Inline markdown faces like `md-ts-code' inherit from `fixed-pitch', which
+Inline markdown faces like `markdown-ts-code-span' inherit from `fixed-pitch', which
 changes the font family.  Display strings must use anonymous face plists
 with font-identity attributes stripped, so columns align under any GUI
 font configuration."
@@ -456,7 +456,7 @@ so visible text still needs consistent alignment across all display lines."
 
 (ert-deftest pi-coding-agent-test-table-overlay-suppresses-buffer-face ()
   "Table overlays suppress tree-sitter buffer faces without losing inline formatting.
-Tree-sitter applies `md-ts-delimiter' (shadow) to separator rows and `bold'
+Tree-sitter applies `markdown-ts-delimiter' (shadow) to separator rows and `bold'
 to headers.  The overlay must suppress these while preserving inline markdown
 formatting (bold, italic) in the display string's text properties."
   (with-temp-buffer
@@ -473,7 +473,7 @@ formatting (bold, italic) in the display string's text properties."
       (should (cl-every (lambda (ov) (overlay-get ov 'face)) ovs))
       ;; Separator overlay does not inherit shadow
       (let ((sep-face (overlay-get (nth 1 ovs) 'face)))
-        (should-not (eq sep-face 'md-ts-delimiter))
+        (should-not (eq sep-face 'markdown-ts-delimiter))
         (should-not (eq sep-face 'shadow)))
       ;; Inline bold from **bold** survives in the data row display string
       (should (pi-coding-agent-test--string-has-face-attr-p

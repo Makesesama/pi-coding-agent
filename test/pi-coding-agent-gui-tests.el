@@ -494,7 +494,7 @@ chat-mode buffer to isolate the toggle logic from RPC timing."
 (ert-deftest pi-coding-agent-gui-test-streaming-no-fences ()
   "Streaming write content shows no fence markers to the user.
 Fences exist in the buffer for tree-sitter parsing, but
-`md-ts-hide-markup' makes them invisible.  Uses a displayed
+`markdown-ts-hide-markup' makes them invisible.  Uses a displayed
 buffer (jit-lock active) to verify under real GUI conditions."
   (let ((buf (get-buffer-create "*pi-gui-fontify-test*")))
     (unwind-protect

@@ -21,7 +21,7 @@ pi-coding-agent.el              ← entry point, autoloads
 
 External package dependency:
 
-- `md-ts-mode` ← tree-sitter markdown major mode used by chat buffers
+- built-in `markdown-ts-mode` (Emacs 31+) ← tree-sitter Markdown mode used by chat buffers
   (loading `pi-coding-agent` must not globally claim unrelated Markdown files)
 
 `menu.el` and `input.el` are siblings — neither requires the other.
@@ -161,7 +161,7 @@ make check             # byte-compile + lint + all tests (= pre-commit hook)
 
 ## Dependencies
 
-`make test` auto-installs Emacs package deps (`transient`, `md-ts-mode`) on first
+`make test` auto-installs Emacs package deps (`transient`, `markdown-table-wrap`) on first
 run and caches via `.deps-stamp`. To force reinstall: `make clean` then `make test`.
 
 ## Pre-commit Hook
@@ -187,7 +187,7 @@ absolute path to your checkout):
 ```
 
 `package-initialize` is required here so installed dependencies like
-`md-ts-mode` and `transient` are on `load-path` before `require` runs.
+`markdown-table-wrap` and `transient` are on `load-path` before `require` runs.
 
 Launch with (from the project root):
 ```bash

@@ -43,7 +43,7 @@
 (require 'pi-coding-agent-core)
 (require 'cl-lib)
 (require 'project)
-(require 'md-ts-mode)
+(require 'markdown-ts-mode)
 (require 'pi-coding-agent-grammars)
 (require 'ansi-color)
 (require 'color)
@@ -779,17 +779,17 @@ DIR is the session directory and SESSION is the optional named-session suffix."
   "Restore the normal read-only contract for chat buffers after saving."
   (setq buffer-read-only t))
 
-(define-derived-mode pi-coding-agent-chat-mode md-ts-mode "Pi-Chat"
+(define-derived-mode pi-coding-agent-chat-mode markdown-ts-mode "Pi-Chat"
   "Major mode for displaying pi conversation.
-Derives from `md-ts-mode' for tree-sitter syntax highlighting.
+Derives from built-in `markdown-ts-mode' for tree-sitter highlighting.
 This is a read-only buffer showing the conversation history."
   :group 'pi-coding-agent
   (setq-local buffer-read-only t)
   (setq-local truncate-lines nil)
   (setq-local word-wrap t)
   ;; Hide markdown markup (**, `, ```) for cleaner display
-  (setq-local md-ts-hide-markup t)
-  (md-ts--set-hide-markup t)
+  (setq-local markdown-ts-hide-markup t)
+  (markdown-ts--set-hide-markup t)
   ;; Strip hidden markup from copy operations (M-w, C-w)
   (setq-local filter-buffer-substring-function
               #'pi-coding-agent--filter-buffer-substring)
@@ -1773,7 +1773,7 @@ Windows where user scrolled up (point earlier) stay in place."
   "Create a setext-style H1 heading separator with LABEL.
 If TIMESTAMP (Emacs time value) is provided, append it after \" · \".
 Returns a markdown setext heading: label line followed by === underline.
-Fontification is handled by `md-ts-mode'.
+Fontification is handled by `markdown-ts-mode'.
 
 Using setext headings enables outline/imenu navigation and keeps our
 turn markers as H1 while LLM ATX headings are leveled down to H2+."

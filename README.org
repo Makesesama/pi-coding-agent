@@ -613,11 +613,10 @@ Track busy sessions for your own mode-line or tab display:
 
 ** Installation details 🧱
 
-MELPA installs =transient=, =md-ts-mode=, and =markdown-table-wrap=
-automatically.  =pi-coding-agent= uses =md-ts-mode= only for its own
-chat and input buffers, so installing or loading this package does not
-change how unrelated =.md= files open.  If you want tree-sitter
-Markdown globally, configure =md-ts-mode= separately.
+MELPA installs =transient= and =markdown-table-wrap= automatically.
+=pi-coding-agent= uses Emacs 31's built-in =markdown-ts-mode= only for
+its own chat and input buffers, so loading this package does not change
+how unrelated =.md= files open.
 
 With =use-package=:
 
@@ -650,7 +649,6 @@ once to install the external dependencies:
 (package-refresh-contents)
 
 (package-install 'transient)
-(package-install 'md-ts-mode)
 (package-install 'markdown-table-wrap)
 #+end_src
 

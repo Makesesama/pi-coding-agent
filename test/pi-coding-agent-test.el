@@ -1686,14 +1686,13 @@ must decide whether this is a no-op."
     (should-not (plist-get result :error))
     (should-not (plist-get result :warning))))
 
-(ert-deftest pi-coding-agent-test-md-ts-mode-package-load-leaves-global-markdown-settings-alone ()
-  "Loading `md-ts-mode' keeps global Markdown associations opt-in."
-  (let ((result (pi-coding-agent-test--markdown-load-state 'md-ts-mode)))
+(ert-deftest pi-coding-agent-test-markdown-ts-mode-load-leaves-global-markdown-settings-alone ()
+  "Loading `markdown-ts-mode' keeps global Markdown associations unchanged."
+  (let ((result (pi-coding-agent-test--markdown-load-state 'markdown-ts-mode)))
     (should (eq t (plist-get result :auto-unchanged)))
     (should (eq t (plist-get result :major-remap-unchanged)))
     (should (eq t (plist-get result :treesit-remap-unchanged)))
-    (should (eq t (plist-get result :md-mode-defined)))
-    (should (eq t (plist-get result :md-mode-maybe-defined)))
+    (should (eq t (plist-get result :markdown-ts-mode-defined)))
     (should (equal (plist-get result :before-md-association)
                    (plist-get result :after-md-association)))
     (should (equal (plist-get result :before-major-markdown-remap)

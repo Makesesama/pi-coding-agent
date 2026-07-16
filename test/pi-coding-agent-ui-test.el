@@ -320,7 +320,7 @@ This ensures all files get code fences for consistent display."
     (pi-coding-agent-input-mode)
     (should (derived-mode-p 'pi-coding-agent-input-mode))
     (should (derived-mode-p 'text-mode))
-    (should-not md-ts-hide-markup)))
+    (should-not markdown-ts-hide-markup)))
 
 (ert-deftest pi-coding-agent-test-input-mode-not-read-only ()
   "pi-coding-agent-input-mode allows editing."
@@ -929,7 +929,7 @@ Buffer is read-only with `inhibit-read-only' used for insertion.
       (should-not (string-match-p "python" result)))))
 
 (ert-deftest pi-coding-agent-test-visible-text-strips-setext-underline ()
-  "visible-text strips setext underlines (hidden by md-ts-hide-markup)."
+  "visible-text strips setext underlines hidden by markdown-ts-mode."
   (pi-coding-agent-test--with-chat-markup "Assistant\n=========\n\nHello\n"
     (let ((result (pi-coding-agent--visible-text (point-min) (point-max))))
       (should (string-match-p "Assistant" result))

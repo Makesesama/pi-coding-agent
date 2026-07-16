@@ -2077,7 +2077,7 @@ Shows a rolling tail truncated to MAX-LINES visual lines.
 When BLOCK is nil, fall back to the current compatibility tool block.
 
 When LANG is non-nil, wrap the tail in a markdown fenced code block so
-that `md-ts-mode' language injection handles syntax highlighting.
+that `markdown-ts-mode' language injection handles syntax highlighting.
 Skips redraw when only the trailing partial line changed (the preview
 shows complete lines only)."
   (let ((raw-text (pi-coding-agent--render-safe-string raw-text)))
