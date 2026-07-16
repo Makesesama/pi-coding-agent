@@ -2287,7 +2287,36 @@ since we don't display them locally. Let pi's message_start handle it."
   (should (equal (pi-coding-agent--subagent-session-file
                   '(:sessionDir "/a/run-0"))
                  (expand-file-name "session.jsonl" "/a/run-0")))
+  (should (equal (pi-coding-agent--subagent-session-file
+                  '(:sessionDir "/a/parent/async-b3b4df60"))
+                 (expand-file-name "run-0/session.jsonl" "/a/parent")))
   (should-not (pi-coding-agent--subagent-session-file '(:id "x"))))
+
+(ert-deftest pi-coding-agent-test-subagent-session-file-active-chain-step ()
+  "The active async chain step need not use the `run-0' session."
+  (let* ((root (pi-coding-agent-test--make-temp-directory
+                "pi-coding-agent-subagent-status-"))
+         (status-dir (expand-file-name "status" root))
+         (status-file (expand-file-name "status.json" status-dir))
+         (expected (expand-file-name "run-2/session.jsonl" root)))
+    (unwind-protect
+        (progn
+          (make-directory status-dir t)
+          (with-temp-file status-file
+            (insert (json-serialize
+                     `(:currentStep 2
+                       :steps [(:sessionFile ,(expand-file-name
+                                               "run-0/session.jsonl" root))
+                               (:sessionFile ,(expand-file-name
+                                               "run-1/session.jsonl" root))
+                               (:sessionFile ,expected)]))))
+          (should
+           (equal
+            (pi-coding-agent--subagent-session-file
+             `(:outputFile ,(expand-file-name "output-2.log" status-dir)
+               :sessionDir ,(expand-file-name "async-id" root)))
+            expected)))
+      (delete-directory root t))))
 
 (ert-deftest pi-coding-agent-test-subagents-list-buffer-renders-rows ()
   "The subagents list buffer renders a clickable row per run."

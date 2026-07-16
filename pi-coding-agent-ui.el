@@ -2503,15 +2503,44 @@ ACTIVE counts runs whose status is \"running\" or \"queued\"."
                         'face (pi-coding-agent--subagent-status-face status))
             (if (string-empty-p extra) "" (format "  (%s)" extra)))))
 
+(defun pi-coding-agent--subagent-status-session-file (run)
+  "Return the active step's session file recorded in RUN status, or nil."
+  (let ((output-file (plist-get run :outputFile)))
+    (when (and (stringp output-file) (> (length output-file) 0))
+      (let ((status-file (expand-file-name
+                          "status.json" (file-name-directory output-file))))
+        (when (file-readable-p status-file)
+          (condition-case nil
+              (with-temp-buffer
+                (insert-file-contents status-file)
+                (let* ((status (json-parse-buffer
+                                :object-type 'plist
+                                :array-type 'list
+                                :null-object nil
+                                :false-object nil))
+                       (index (plist-get status :currentStep))
+                       (steps (plist-get status :steps))
+                       (step (and (integerp index) (nth index steps)))
+                       (file (and step (plist-get step :sessionFile))))
+                  (and (stringp file) (> (length file) 0) file)))
+            (error nil)))))))
+
 (defun pi-coding-agent--subagent-session-file (run)
-  "Return the session file path for subagent RUN, or nil.
-Prefers an explicit :sessionFile, otherwise derives it from :sessionDir."
+  "Return the active session file path for subagent RUN, or nil.
+Prefers an explicit :sessionFile, then the active step recorded in the
+asynchronous status file.  As an initial fallback, an `async-*' :sessionDir
+maps to the first static child under its sibling `run-0' directory."
   (let ((file (plist-get run :sessionFile))
         (dir (plist-get run :sessionDir)))
     (cond
      ((and (stringp file) (> (length file) 0)) file)
+     ((pi-coding-agent--subagent-status-session-file run))
      ((and (stringp dir) (> (length dir) 0))
-      (expand-file-name "session.jsonl" dir))
+      (let ((dir (directory-file-name (expand-file-name dir))))
+        (if (string-prefix-p "async-" (file-name-nondirectory dir))
+            (expand-file-name "run-0/session.jsonl"
+                              (file-name-directory dir))
+          (expand-file-name "session.jsonl" dir))))
      (t nil))))
 
 ;;; Subagent output rendering
